@@ -31,9 +31,21 @@ class Settings(BaseSettings):
     postgres_sslmode: str | None = Field(default=None)
 
     # SQLAlchemy 커넥션 풀. Lambda(stateless, 컨테이너당 요청 1개)에선 큰 풀이
-    # 무의미하고 RDS 커넥션만 소진하므로 작게 잡는다.
+    # 무의미하고 RDS 커넥션만 소진하므로 작게 잡는다. EC2 상시 서버로 띄울 땐
+    # .env에서 db_pool_size를 5 내외로 올린다(공유 운영 DB라 과하게는 금지).
     db_pool_size: int = Field(default=1)
     db_max_overflow: int = Field(default=2)
+
+    # CORS 허용 오리진. 브라우저(프론트)가 다른 오리진에서 API를 부르면 이 목록에
+    # 없는 한 브라우저가 차단한다. 콤마 구분 문자열로 두는 이유: list 타입은
+    # pydantic-settings가 env 값을 JSON으로 파싱하려 해 "a,b" 같은 평범한 입력이
+    # 깨진다. 기본값은 로컬 프론트 개발 포트(Vite 5173 / CRA·Next 3000).
+    cors_origins: str = Field(default="http://localhost:5173,http://localhost:3000")
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """콤마 구분 문자열 → 리스트. 공백/빈 항목은 버린다."""
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
     def database_url(self) -> str:

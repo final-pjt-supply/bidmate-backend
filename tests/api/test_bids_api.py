@@ -123,6 +123,14 @@ def test_detail_returns_assembled_qualification(client_with_rows):
     assert "capacity_reqs" not in q
 
 
+def test_cors_allows_configured_origin(client_with_rows):
+    # 프론트(브라우저) 호출이 막히지 않도록 허용 오리진이 응답 헤더에 실려야 한다.
+    # 기본 허용 목록(config.cors_origins)의 로컬 개발 오리진으로 검증.
+    client = client_with_rows([make_bid()])
+    res = client.get("/bids", headers={"Origin": "http://localhost:5173"})
+    assert res.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
 def test_detail_missing_or_non_merged_is_404(client_with_rows):
     rows = [make_bid(bid_id="hidden_00", bid_ntce_no="hidden", qual_status="pending")]
     client = client_with_rows(rows)
