@@ -1,0 +1,22 @@
+# BidMate API용 systemd 유닛 (개발용 EC2).
+# 설치 위치: /etc/systemd/system/bidmate-api.service
+# 활성화:   sudo systemctl daemon-reload && sudo systemctl enable --now bidmate-api
+# 로그:     journalctl -u bidmate-api -f
+#
+# WorkingDirectory를 리포 루트로 두면 app/config.py가 그 경로의 .env를 읽는다
+# (pydantic env_file=".env", 상대경로 → CWD 기준). 그래서 EnvironmentFile은 불필요.
+[Unit]
+Description=BidMate API (FastAPI/uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/bidding-agent
+ExecStart=/home/ubuntu/bidding-agent/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
