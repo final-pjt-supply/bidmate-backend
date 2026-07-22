@@ -1,0 +1,4 @@
+# 리눅스에서 실행되는 배포 파일은 LF 강제 (CRLF면 우분투에서 shebang/파싱 깨짐)
+deploy/*.sh          text eol=lf
+deploy/*.service     text eol=lf
+deploy/env.ec2.example text eol=lf
