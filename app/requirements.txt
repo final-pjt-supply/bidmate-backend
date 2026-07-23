@@ -9,6 +9,7 @@ sqlalchemy>=2
 alembic
 mangum
 psycopg[binary]        # SQLAlchemy 드라이버: postgresql+psycopg:// (psycopg3)
+boto3                  # 고객 여정 이벤트 S3(NDJSON) 적재
 # 개발/테스트 전용
 uvicorn
 httpx                  # fastapi.testclient가 내부적으로 사용
