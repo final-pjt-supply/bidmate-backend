@@ -20,7 +20,6 @@ from app.infra.db.session import Base
 # 모델을 import해야 Base.metadata에 테이블이 등록된다.
 # (앞으로 company/match_results 모델을 추가하면 여기서 함께 import한다.)
 import app.infra.db.models.bid  # noqa: F401
-import app.infra.db.models.user_event  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

@@ -11,7 +11,7 @@ from app.api.deps import get_event_service
 from app.api.v1.schemas.event import EventIn
 from app.services.event_service import EventService
 
-router = APIRouter()
+router = APIRouter(tags=["events"])
 
 
 @router.post("/events", status_code=status.HTTP_202_ACCEPTED)
