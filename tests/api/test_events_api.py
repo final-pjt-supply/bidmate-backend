@@ -71,11 +71,13 @@ def test_v1_added_events_accepted_and_typed(client_and_sink):
     client.post("/events", json=_payload(event_name="bid_external_link_clicked"))
     client.post("/events", json=_payload(event_name="bid_bookmarked", properties={"on": True}))
     client.post("/events", json=_payload(event_name="search_submitted", properties={"query_len": 12}))
+    client.post("/events", json=_payload(event_name="bid_impression", properties={"position": 7, "list": "search"}))
     types = {e["event_name"]: e["event_type"] for e in sink.saved}
     assert types["login_completed"] == "action"
     assert types["bid_external_link_clicked"] == "click"
     assert types["bid_bookmarked"] == "action"
     assert types["search_submitted"] == "action"
+    assert types["bid_impression"] == "impression"   # 노출 = 별도 type(CTR 분모)
 
 
 def test_unknown_event_name_is_422(client_and_sink):
