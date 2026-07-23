@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""고객 여정 이벤트 카탈로그 (v1, 프론트 확정 15종).
+"""고객 여정 이벤트 카탈로그 (v1, 프론트 확정 16종).
 
 이벤트 이름/유형을 코드 상수로 고정한다(자유 문자열 금지 — home_view/view_home/
 HomeViewed 난립 방지). event_type은 프론트가 보내지 않고 event_name에서 서버가
@@ -12,20 +12,22 @@ from enum import Enum
 
 class EventType(str, Enum):
     """이벤트 대분류(집계용). *_viewed=page_view, 링크/카드 클릭=click,
-    상태 변경(제출/저장/전송/스크랩/검색/로그인)=action."""
+    상태 변경=action, 노출(보여짐)=impression(클릭 아님 — CTR의 분모)."""
     PAGE_VIEW = "page_view"
     CLICK = "click"
     ACTION = "action"
+    IMPRESSION = "impression"
 
 
 class EventName(str, Enum):
-    """수집 허용 이벤트(v1 15종). {대상}_{동사} 소문자 스네이크."""
+    """수집 허용 이벤트(v1 16종). {대상}_{동사} 소문자 스네이크."""
     # ① 진입 / 세션
     HOME_VIEWED = "home_viewed"
     MYPAGE_VIEWED = "mypage_viewed"
     LOGIN_COMPLETED = "login_completed"
     # ② 탐색 / 필터
     BID_LIST_FILTERED = "bid_list_filtered"
+    BID_IMPRESSION = "bid_impression"          # 공고 카드가 화면에 노출된 순간(클릭 아님)
     BID_CARD_CLICKED = "bid_card_clicked"
     BID_DETAIL_VIEWED = "bid_detail_viewed"
     # ③ 강한 관심 신호 (추천·전환 핵심)
@@ -50,6 +52,7 @@ EVENT_TYPE_BY_NAME: dict[EventName, EventType] = {
     EventName.LOGIN_COMPLETED: EventType.ACTION,
     # ② 탐색 / 필터
     EventName.BID_LIST_FILTERED: EventType.ACTION,
+    EventName.BID_IMPRESSION: EventType.IMPRESSION,
     EventName.BID_CARD_CLICKED: EventType.CLICK,
     EventName.BID_DETAIL_VIEWED: EventType.PAGE_VIEW,
     # ③ 강한 관심 신호
