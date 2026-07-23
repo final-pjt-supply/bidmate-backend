@@ -7,7 +7,8 @@ URL에는 버전 프리픽스를 붙이지 않는다 — 프론트 확정 명세
 """
 from fastapi import APIRouter
 
-from app.api.v1 import bids
+from app.api.v1 import bids, events
 
 api_router = APIRouter()
 api_router.include_router(bids.router)
+api_router.include_router(events.router)

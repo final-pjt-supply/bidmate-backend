@@ -13,8 +13,10 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.infra.db.repositories.bid_repository import BidRepository
+from app.infra.db.repositories.event_repository import EventRepository
 from app.infra.db.session import get_session
 from app.services.bid_service import BidService
+from app.services.event_service import EventService
 
 
 @dataclass(frozen=True)
@@ -43,3 +45,7 @@ def get_db() -> Iterator[Session]:
 
 def get_bid_service(db: Session = Depends(get_db)) -> BidService:
     return BidService(BidRepository(db))
+
+
+def get_event_service(db: Session = Depends(get_db)) -> EventService:
+    return EventService(EventRepository(db))
