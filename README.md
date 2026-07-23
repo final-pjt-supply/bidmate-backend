@@ -27,13 +27,27 @@ alembic/      마이그레이션 (API 소유 테이블만 관리)
 deploy/       개발용 EC2 배포 산출물
 ```
 
-## 로컬 실행
+## 실행 (서버)
+
+RDS에 접근 가능한 EC2(RDS와 같은 VPC)에서 **systemd 상시 실행**. EC2 스펙·보안그룹·코드
+업로드 등 전체 절차는 [deploy/README.md](deploy/README.md) 참조.
 
 ```bash
-pip install -r app/requirements.txt
-cp deploy/env.ec2.example .env   # 접속정보 채우기 (로컬은 docker Postgres 또는 SSH 터널)
-uvicorn app.main:app --reload
+# EC2에서 (코드 업로드 후)
+cp deploy/env.ec2.example .env    # RDS 직접접속 정보 채우기 (SSH 터널 아님)
+bash deploy/setup.sh              # venv + 의존성 + systemd 등록 + 헬스체크 원샷
 ```
+
+서비스 관리:
+
+```bash
+sudo systemctl restart bidmate-api      # 코드 갱신 후 재배포
+journalctl -u bidmate-api -f            # 로그
+curl http://<EC2_PUBLIC_IP>:8000/health # 상태 확인
+```
+
+수동 실행이 필요하면: `uvicorn app.main:app --host 0.0.0.0 --port 8000`
+(로컬 개발 시엔 `--reload`, DB는 docker Postgres 또는 SSH 터널)
 
 ## API
 
