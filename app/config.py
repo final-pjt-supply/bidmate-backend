@@ -48,7 +48,9 @@ class Settings(BaseSettings):
     s3_events_prefix: str = Field(default="user_events")
     aws_region: str = Field(default="")              # 비우면 boto3 기본(EC2 리전)
     event_flush_max: int = Field(default=20)
-    event_flush_interval_sec: float = Field(default=15.0)
+    # 2초: 테스트에서 클릭 후 거의 즉시 S3에 뜨게(체감 실시간). 몰릴 땐 여전히
+    # flush_max(20건)로 묶여 tiny-file을 어느 정도 방지. 진짜 실시간은 Firehose.
+    event_flush_interval_sec: float = Field(default=2.0)
 
     @property
     def cors_origins_list(self) -> list[str]:
