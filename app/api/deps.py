@@ -13,8 +13,8 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.infra.db.repositories.bid_repository import BidRepository
-from app.infra.db.repositories.event_repository import EventRepository
 from app.infra.db.session import get_session
+from app.infra.s3.event_sink import get_event_sink
 from app.services.bid_service import BidService
 from app.services.event_service import EventService
 
@@ -47,5 +47,6 @@ def get_bid_service(db: Session = Depends(get_db)) -> BidService:
     return BidService(BidRepository(db))
 
 
-def get_event_service(db: Session = Depends(get_db)) -> EventService:
-    return EventService(EventRepository(db))
+def get_event_service() -> EventService:
+    # 이벤트는 RDS가 아니라 S3(NDJSON)로 적재 — 분석을 운영 DB에서 분리. DB 세션 불필요.
+    return EventService(get_event_sink())

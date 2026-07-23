@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     # 깨진다. 기본값은 로컬 프론트 개발 포트(Vite 5173 / CRA·Next 3000).
     cors_origins: str = Field(default="http://localhost:5173,http://localhost:3000")
 
+    # 고객 여정 이벤트 S3 적재. 분석을 운영 DB에서 분리(NDJSON, 날짜 파티션).
+    # 배칭: flush_max건 또는 flush_interval초마다 S3에 한 파일로 올림(best-effort).
+    s3_bucket: str = Field(default="")               # 예: bidmate
+    s3_events_prefix: str = Field(default="user_events")
+    aws_region: str = Field(default="")              # 비우면 boto3 기본(EC2 리전)
+    event_flush_max: int = Field(default=20)
+    event_flush_interval_sec: float = Field(default=15.0)
+
     @property
     def cors_origins_list(self) -> list[str]:
         """콤마 구분 문자열 → 리스트. 공백/빈 항목은 버린다."""
