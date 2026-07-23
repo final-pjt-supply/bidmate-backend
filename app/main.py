@@ -5,11 +5,26 @@
 `uvicorn app.main:app --reload`로 띄운다.
 """
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
 from app.api.v1.router import api_router
+from app.config import get_settings
 
 app = FastAPI(title="BidMate API", version="0.1.0")
+
+# 프론트(브라우저)가 다른 오리진에서 호출하므로 CORS 허용이 필수다. 없으면 서버가
+# 정상 응답해도 브라우저가 막는다. 허용 오리진은 설정(cors_origins, .env로 주입)에서
+# 온다 — 와일드카드(*) 대신 명시 목록을 써서 아무 사이트나 못 부르게 한다.
+_settings = get_settings()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_settings.cors_origins_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(api_router)
 
 
