@@ -52,6 +52,35 @@ class Settings(BaseSettings):
     # flush_max(20건)로 묶여 tiny-file을 어느 정도 방지. 진짜 실시간은 Firehose.
     event_flush_interval_sec: float = Field(default=2.0)
 
+    # --- 인증(AWS Cognito User Pool) ---
+    # 비밀번호는 Cognito가 보관한다(우리 DB에 저장하지 않음). 서버는 토큰만 검증하고
+    # cognito_sub로 companies 행을 찾는다. 세 값 모두 비밀이 아니라 .env로 충분.
+    cognito_region: str = Field(default="ap-northeast-2")
+    cognito_user_pool_id: str = Field(default="")
+    cognito_client_id: str = Field(default="")
+
+    # 로컬 개발 편의: 토큰 없이 고정 회사로 통과시킨다.
+    # ⚠ 운영에는 절대 true로 두지 말 것(인증이 통째로 무력화된다).
+    auth_disabled: bool = Field(default=False)
+    dev_company_id: str = Field(default="")
+
+    @property
+    def cognito_issuer(self) -> str:
+        """토큰의 iss 클레임과 대조할 발급자 URL."""
+        return (
+            f"https://cognito-idp.{self.cognito_region}.amazonaws.com/"
+            f"{self.cognito_user_pool_id}"
+        )
+
+    @property
+    def cognito_jwks_url(self) -> str:
+        """서명 검증용 공개키 목록(JWKS). PyJWKClient가 캐싱한다."""
+        return f"{self.cognito_issuer}/.well-known/jwks.json"
+
+    @property
+    def auth_configured(self) -> bool:
+        return bool(self.cognito_user_pool_id and self.cognito_client_id)
+
     @property
     def cors_origins_list(self) -> list[str]:
         """콤마 구분 문자열 → 리스트. 공백/빈 항목은 버린다."""
