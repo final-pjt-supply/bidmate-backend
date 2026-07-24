@@ -6,10 +6,10 @@ from fastapi.testclient import TestClient
 
 from agents.schemas import AgentResponse, Citation, Filters, SessionContext
 
+from app.agents.chat_service import AgentChatService
 from app.agents.session_store import InMemorySessionStore
 from app.api.deps import get_agent_chat_service
 from app.main import app
-from app.services.agent_chat_service import AgentChatService
 
 
 def make_ctx(summary: str = "턴1") -> SessionContext:

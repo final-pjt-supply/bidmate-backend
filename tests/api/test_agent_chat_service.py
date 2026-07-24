@@ -3,8 +3,8 @@
 '수정 없이 그대로' 들어가는지를 가짜 runner로 고정한다(Bedrock 불필요)."""
 from agents.schemas import AgentResponse, Filters, SessionContext
 
+from app.agents.chat_service import AgentChatService
 from app.agents.session_store import InMemorySessionStore
-from app.services.agent_chat_service import AgentChatService
 
 
 def make_ctx(summary: str) -> SessionContext:

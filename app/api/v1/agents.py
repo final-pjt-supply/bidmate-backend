@@ -7,9 +7,9 @@ bidmate-agents 패키지(run_agent) 소관. sync def라 FastAPI가 스레드풀�
 """
 from fastapi import APIRouter, Depends
 
+from app.agents.chat_service import AgentChatService
 from app.api.deps import get_agent_chat_service
 from app.api.v1.schemas.agent import AgentChatRequest, AgentChatResponse
-from app.services.agent_chat_service import AgentChatService
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 

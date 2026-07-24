@@ -12,11 +12,11 @@ from dataclasses import dataclass
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.agents.chat_service import AgentChatService
 from app.agents.session_store import get_session_store
 from app.infra.db.repositories.bid_repository import BidRepository
 from app.infra.db.session import get_session
 from app.infra.s3.event_sink import get_event_sink
-from app.services.agent_chat_service import AgentChatService
 from app.services.bid_service import BidService
 from app.services.event_service import EventService
 
