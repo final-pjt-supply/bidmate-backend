@@ -9,12 +9,15 @@
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.agents.chat_service import AgentChatService
 from app.agents.session_store import get_session_store
+from app.config import get_settings
+from app.infra.auth.cognito import TokenError, verify_id_token
 from app.infra.db.repositories.bid_repository import BidRepository
+from app.infra.db.repositories.company_repository import CompanyRepository
 from app.infra.db.session import get_session
 from app.infra.s3.event_sink import get_event_sink
 from app.services.bid_service import BidService
@@ -25,24 +28,80 @@ from app.services.event_service import EventService
 class CurrentUser:
     """현재 요청 주체. 멀티테넌시 격리(WHERE company_id=?)와 회사별 정렬의 키.
 
-    company_id가 None인 건 '아직 인증 미구현'을 뜻한다 — 인증이 붙으면 토큰에서
-    채워지고, None을 흘려보내는 분기는 그때 제거한다.
+    company_id가 None이면 '비로그인'이다 — 공고 목록/상세처럼 로그인 없이도 보이는
+    화면이 있어 익명을 허용한다. 로그인이 필수인 엔드포인트는
+    get_authenticated_user를 쓴다(없으면 401).
     """
     company_id: str | None = None
-
-
-def get_current_user() -> CurrentUser:
-    """★ 인증 진입점(스텁). 지금은 무조건 통과시키고 익명 사용자를 돌려준다.
-
-    나중엔 여기서 Authorization 헤더의 JWT를 검증(Cognito JWKS)하고 company_id를
-    꺼내 CurrentUser로 채운다. 엔드포인트 시그니처는 그대로 두고 이 함수 본문만
-    교체하면 되도록, 반환 타입을 지금 고정해 둔다.
-    """
-    return CurrentUser(company_id=None)
+    email: str | None = None
 
 
 def get_db() -> Iterator[Session]:
     yield from get_session()
+
+
+def _bearer_token(request: Request) -> str | None:
+    """Authorization: Bearer <token> 에서 토큰만 꺼낸다. 없으면 None."""
+    header = request.headers.get("Authorization") or ""
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def get_current_user(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> CurrentUser:
+    """★ 인증 진입점 — '선택적' 인증.
+
+    토큰이 없으면 익명(company_id=None)으로 통과시킨다. 공고 조회는 비로그인도
+    가능해야 하기 때문(홈 화면). 토큰이 있으면 검증해서 company_id를 채운다.
+    토큰이 있는데 유효하지 않으면 조용히 익명 처리하지 않고 401로 막는다 —
+    만료된 토큰을 들고 계속 익명 결과를 받으면 로그인이 풀린 걸 눈치채기 어렵다.
+    """
+    settings = get_settings()
+
+    # 로컬 개발 우회: 토큰 없이 고정 회사로 통과. 운영에선 auth_disabled=False.
+    if settings.auth_disabled:
+        return CurrentUser(company_id=settings.dev_company_id or None)
+
+    token = _bearer_token(request)
+    if token is None:
+        return CurrentUser()  # 비로그인 — 허용
+
+    identity = _verify_or_401(token)
+    company = CompanyRepository(db).get_or_create(
+        cognito_sub=identity.sub,
+        email=identity.email,
+        # 회사명은 가입 시 별도로 받기 전까지 이메일 앞부분을 임시 표시명으로 둔다.
+        name=identity.name or (identity.email or "").split("@")[0] or "이름 미등록",
+    )
+    return CurrentUser(company_id=str(company.id), email=company.email)
+
+
+def get_authenticated_user(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """로그인이 '필수'인 엔드포인트용. 비로그인이면 401."""
+    if current_user.company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="로그인이 필요합니다",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return current_user
+
+
+def _verify_or_401(token: str):
+    try:
+        return verify_id_token(token)
+    except TokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
 
 
 def get_bid_service(db: Session = Depends(get_db)) -> BidService:
