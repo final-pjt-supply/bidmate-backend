@@ -67,6 +67,52 @@ class BidRepository:
         )
         return list(self._session.execute(stmt).scalars().all())
 
+    # ── 검색 전용 경로 ────────────────────────────────────────────────
+    # 홈·추천이 공유하는 count/list_page와 분리해 둔다. 검색은 앞으로 필터가 계속
+    # 늘어나는데(공고명·금액·낙찰방법·지역…), 공용 경로에 얹으면 필터 하나가 잘못돼도
+    # 홈·추천이 함께 깨진다. merged 게이트·마감 필터가 두 벌이 되는 비용은 감수한다.
+
+    def search_count(self, *, category: str | None, clse_after: datetime | None = None) -> int:
+        """검색 필터 적용 후 총 건수."""
+        stmt = select(func.count()).select_from(Bid).where(Bid.qual_status == _MERGED)
+        stmt = self._apply_search_filters(stmt, category, clse_after)
+        return self._session.execute(stmt).scalar_one()
+
+    def search_page(
+        self,
+        *,
+        category: str | None,
+        sort: str,
+        limit: int,
+        offset: int,
+        clse_after: datetime | None = None,
+    ) -> list[Bid]:
+        """검색 결과 한 페이지.
+
+        정렬 두 가지 — 어느 쪽이든 bid_id로 tie-break해 페이지 경계에서 행이 중복·
+        누락되지 않게 한다(불안정 정렬이면 2페이지에 1페이지 행이 다시 나올 수 있다).
+          * deadline: 마감 임박순. bid_clse_dt ASC + NULLS LAST(마감 미정이 상단을 먹지 않게)
+          * recent  : 최신 등록순. bid_ntce_dt DESC + NULLS LAST(게시일 미상은 뒤로)
+        """
+        stmt = self._merged_base()
+        stmt = self._apply_search_filters(stmt, category, clse_after)
+        if sort == "recent":
+            order = (Bid.bid_ntce_dt.desc().nulls_last(), Bid.bid_id.asc())
+        else:
+            order = (Bid.bid_clse_dt.asc().nulls_last(), Bid.bid_id.asc())
+        stmt = stmt.order_by(*order).limit(limit).offset(offset)
+        return list(self._session.execute(stmt).scalars().all())
+
+    @staticmethod
+    def _apply_search_filters(stmt, category, clse_after=None):
+        """검색 경로 필터. 후속 이슈(#25 후속)에서 공고명·금액·낙찰방법 등이 여기 붙는다."""
+        if category is not None:
+            stmt = stmt.where(Bid.bid_category == category)
+        # 마감 지난 공고 제외. 마감일 NULL은 "아직 안 닫힘"으로 보고 남긴다(공용 경로와 동일).
+        if clse_after is not None:
+            stmt = stmt.where(or_(Bid.bid_clse_dt >= clse_after, Bid.bid_clse_dt.is_(None)))
+        return stmt
+
     def get_by_bid_id(self, bid_id: str) -> Bid | None:
         """merged인 단건. 존재하지 않거나 merged가 아니면 None(호출부가 404로 통일)."""
         stmt = self._merged_base().where(Bid.bid_id == bid_id)
