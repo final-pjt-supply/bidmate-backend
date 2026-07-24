@@ -29,3 +29,8 @@ class Company(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    # 탈퇴 시각(소프트 삭제). NULL이면 활성 회원.
+    # 즉시 파기하지 않는 이유: 실수 복구·분쟁 대응 여지를 남기기 위함(30일 보관 안내).
+    # 조회는 항상 deleted_at IS NULL 조건을 건다 — 탈퇴 회사가 되살아나면 안 된다.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)

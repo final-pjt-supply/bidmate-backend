@@ -71,7 +71,18 @@ def get_current_user(
         return CurrentUser()  # 비로그인 — 허용
 
     identity = _verify_or_401(token)
-    company = CompanyRepository(db).get_or_create(
+    repo = CompanyRepository(db)
+
+    # 탈퇴한 계정의 토큰은 만료 전까지 살아 있다. 막지 않으면 아래 JIT 생성이
+    # 회사를 다시 만들어 탈퇴가 무효가 된다.
+    if repo.is_withdrawn_sub(identity.sub):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="탈퇴한 계정입니다",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    company = repo.get_or_create(
         cognito_sub=identity.sub,
         email=identity.email,
         # 회사명은 가입 시 별도로 받기 전까지 이메일 앞부분을 임시 표시명으로 둔다.
