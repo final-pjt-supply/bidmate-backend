@@ -49,17 +49,23 @@ def search_bids(
         max_length=100,
         description="공고명·수요기관·공고기관 부분일치(대소문자 무시). 공백만 주면 미적용.",
     ),
+    include_closed: bool = Query(
+        default=False,
+        description="true면 마감 지난 공고도 포함. 정렬은 활성 공고가 앞에 온다.",
+    ),
     page: int = Query(default=1, ge=1, description="1-based. 범위 밖이면 빈 배열."),
     service: BidService = Depends(get_bid_service),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> BidListResponse:
-    """공고 검색. 마감 지난 공고는 제외한다.
+    """공고 검색. 기본은 마감 지난 공고를 제외한다(include_closed=true면 포함).
 
     ⚠ 이 라우트는 반드시 아래 `/{bid_id}`보다 위에 있어야 한다. 아래로 내려가면
     FastAPI가 정의 순서대로 매칭하므로 "search"가 bid_id로 먹혀 404가 난다.
     """
     _ = current_user   # 인증 게이트만 통과시킨다(검색은 아직 회사별 분기 없음).
-    return service.search_bids(category=category, sort=sort, page=page, q=q)
+    return service.search_bids(
+        category=category, sort=sort, page=page, q=q, include_closed=include_closed
+    )
 
 
 @router.get("/{bid_id}", response_model=BidDetail)
