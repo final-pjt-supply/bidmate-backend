@@ -109,6 +109,63 @@ def test_search_route_not_shadowed_by_detail_route(client_with_rows):
     assert client.get("/bids/search").status_code == 200
 
 
+def _q_rows():
+    """검색어가 걸릴 컬럼을 하나씩 다르게 둔 3건 + 아무 데도 안 걸리는 1건."""
+    return [
+        make_bid(bid_id="nm_00", bid_ntce_no="nm", bid_ntce_nm="도로 포장공사",
+                 dminstt_nm="성남시청", ntce_instt_nm="조달청"),
+        make_bid(bid_id="dm_00", bid_ntce_no="dm", bid_ntce_nm="교량 보수",
+                 dminstt_nm="한국도로공사", ntce_instt_nm="조달청"),
+        make_bid(bid_id="nt_00", bid_ntce_no="nt", bid_ntce_nm="상수도 정비",
+                 dminstt_nm="성남시청", ntce_instt_nm="도로관리사업소"),
+        make_bid(bid_id="no_00", bid_ntce_no="no", bid_ntce_nm="전산장비 구매",
+                 dminstt_nm="성남시청", ntce_instt_nm="조달청"),
+    ]
+
+
+def test_q_matches_any_of_three_columns(client_with_rows):
+    """공고명·수요기관·공고기관 중 하나만 걸려도 결과에 포함된다."""
+    client = client_with_rows(_q_rows())
+    body = client.get("/bids/search?q=도로").json()
+    assert body["total"] == 3
+    assert {i["bid_id"] for i in body["items"]} == {"nm_00", "dm_00", "nt_00"}
+
+
+def test_q_is_case_insensitive(client_with_rows):
+    rows = [make_bid(bid_id="en_00", bid_ntce_no="en", bid_ntce_nm="AI 플랫폼 구축")]
+    client = client_with_rows(rows)
+    assert client.get("/bids/search?q=ai").json()["total"] == 1
+
+
+def test_q_absent_or_blank_means_no_filter(client_with_rows):
+    """공백만 친 검색어로 결과가 사라지면 안 된다(패턴이 '%   %'가 되는 실수 방지)."""
+    client = client_with_rows(_q_rows())
+    assert client.get("/bids/search").json()["total"] == 4
+    assert client.get("/bids/search?q=").json()["total"] == 4
+    assert client.get("/bids/search?q=%20%20").json()["total"] == 4
+
+
+def test_q_no_match_returns_empty_not_error(client_with_rows):
+    client = client_with_rows(_q_rows())
+    body = client.get("/bids/search?q=존재하지않는검색어").json()
+    assert body["total"] == 0 and body["items"] == []
+
+
+def test_q_combines_with_category(client_with_rows):
+    rows = [
+        make_bid(bid_id="w_00", bid_ntce_no="w", bid_ntce_nm="도로 포장", bid_category="cnstwk"),
+        make_bid(bid_id="s_00", bid_ntce_no="s", bid_ntce_nm="도로 설계", bid_category="servc"),
+    ]
+    client = client_with_rows(rows)
+    body = client.get("/bids/search?q=도로&category=cnstwk").json()
+    assert body["total"] == 1 and body["items"][0]["bid_id"] == "w_00"
+
+
+def test_q_too_long_is_422(client_with_rows):
+    client = client_with_rows(_q_rows())
+    assert client.get("/bids/search?q=" + "가" * 101).status_code == 422
+
+
 def test_list_endpoint_still_rejects_recent(client_with_rows):
     """기존 GET /bids의 정렬 계약은 그대로 — recent는 여기서 받지 않는다."""
     client = client_with_rows([make_bid()])

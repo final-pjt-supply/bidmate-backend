@@ -73,6 +73,7 @@ class BidService:
         category: BidCategory | None,
         sort: SearchSortKey,
         page: int,
+        q: str | None = None,
     ) -> BidListResponse:
         """공고 검색(GET /bids/search).
 
@@ -83,11 +84,15 @@ class BidService:
         """
         category_value = category.value if category is not None else None
         sort_value = sort.value
+        # 공백만 친 검색어는 "검색 안 함"으로 본다 — 안 그러면 '%   %' 패턴이 되어
+        # 공백 없는 공고명이 통째로 빠진다.
+        keyword = q.strip() if q else None
+        keyword = keyword or None
         # 마감 지난 공고는 노출하지 않는다(공용 경로와 동일 규칙).
-        # TODO(#25 후속): include_closed 파라미터가 붙으면 여기서 None으로 분기한다.
+        # TODO(후속): include_closed 파라미터가 붙으면 여기서 None으로 분기한다.
         now_kst = datetime.now(_KST).replace(tzinfo=None)
 
-        total = self._repo.search_count(category=category_value, clse_after=now_kst)
+        total = self._repo.search_count(category=category_value, clse_after=now_kst, q=keyword)
         offset = (page - 1) * PAGE_SIZE
         rows = self._repo.search_page(
             category=category_value,
@@ -95,6 +100,7 @@ class BidService:
             limit=PAGE_SIZE,
             offset=offset,
             clse_after=now_kst,
+            q=keyword,
         )
         items = [BidListItem.model_validate(r) for r in rows]
         return BidListResponse(total=total, page=page, page_size=PAGE_SIZE, items=items)
