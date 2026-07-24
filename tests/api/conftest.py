@@ -93,7 +93,7 @@ class FakeBidRepository:
     def search_count(self, *, category, clse_after=None, q=None) -> int:
         return len(self._search_filtered(category, clse_after, q))
 
-    def search_page(self, *, category, sort, limit, offset, clse_after=None, q=None) -> list[Bid]:
+    def search_page(self, *, category, sort, limit, offset, now, clse_after=None, q=None) -> list[Bid]:
         rows = self._search_filtered(category, clse_after, q)
         if sort == "recent":
             # bid_ntce_dt DESC NULLS LAST, then bid_id ASC (repository와 동일).
@@ -103,10 +103,16 @@ class FakeBidRepository:
                 key=lambda r: (r.bid_ntce_dt is None, -(r.bid_ntce_dt or datetime.min).timestamp()),
             )
         else:
-            rows = sorted(
-                rows,
-                key=lambda r: (r.bid_clse_dt is None, r.bid_clse_dt or datetime.max, r.bid_id),
-            )
+            # 활성 → 마감 → 미정. 활성은 마감 임박순, 마감은 최근 마감순
+            # (repository._deadline_order 미러링).
+            def key(r: Bid):
+                if r.bid_clse_dt is None:
+                    return (2, 0.0, r.bid_id)
+                if r.bid_clse_dt < now:
+                    return (1, -r.bid_clse_dt.timestamp(), r.bid_id)
+                return (0, r.bid_clse_dt.timestamp(), r.bid_id)
+
+            rows = sorted(rows, key=key)
         return rows[offset : offset + limit]
 
     def get_by_bid_id(self, bid_id: str) -> Bid | None:

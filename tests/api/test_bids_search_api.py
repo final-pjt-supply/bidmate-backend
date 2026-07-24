@@ -162,6 +162,47 @@ def test_q_combines_with_category(client_with_rows):
     assert body["total"] == 1 and body["items"][0]["bid_id"] == "w_00"
 
 
+def _closed_mix():
+    """마감된 것 2건 + 활성 2건 + 미정 1건."""
+    return [
+        make_bid(bid_id="old_00", bid_ntce_no="old", bid_clse_dt=datetime(2020, 1, 1)),
+        make_bid(bid_id="recent_00", bid_ntce_no="recent", bid_clse_dt=datetime(2024, 1, 1)),
+        make_bid(bid_id="soon_00", bid_ntce_no="soon", bid_clse_dt=datetime(2027, 1, 1)),
+        make_bid(bid_id="later_00", bid_ntce_no="later", bid_clse_dt=datetime(2028, 1, 1)),
+        make_bid(bid_id="null_00", bid_ntce_no="null", bid_clse_dt=None),
+    ]
+
+
+def test_include_closed_default_excludes_closed(client_with_rows):
+    """기본은 지금과 동일 — 마감된 공고는 안 나온다."""
+    body = client_with_rows(_closed_mix()).get("/bids/search").json()
+    assert {i["bid_id"] for i in body["items"]} == {"soon_00", "later_00", "null_00"}
+
+
+def test_include_closed_true_adds_closed_bids(client_with_rows):
+    body = client_with_rows(_closed_mix()).get("/bids/search?include_closed=true").json()
+    assert body["total"] == 5
+
+
+def test_include_closed_keeps_active_first(client_with_rows):
+    """이미 끝난 공고가 1페이지를 차지하면 안 된다 — 활성 → 마감 → 미정 순서."""
+    body = client_with_rows(_closed_mix()).get("/bids/search?include_closed=true").json()
+    ids = [i["bid_id"] for i in body["items"]]
+    assert ids == [
+        "soon_00",    # 활성, 마감 임박순
+        "later_00",
+        "recent_00",  # 마감, 최근에 끝난 순
+        "old_00",
+        "null_00",    # 마감 미정은 맨 뒤
+    ]
+
+
+def test_include_closed_does_not_affect_recent_sort(client_with_rows):
+    """recent 정렬은 게시일 기준이라 마감 여부와 무관하게 동작한다."""
+    res = client_with_rows(_closed_mix()).get("/bids/search?include_closed=true&sort=recent")
+    assert res.status_code == 200 and res.json()["total"] == 5
+
+
 def test_q_too_long_is_422(client_with_rows):
     client = client_with_rows(_q_rows())
     assert client.get("/bids/search?q=" + "가" * 101).status_code == 422

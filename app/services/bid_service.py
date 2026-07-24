@@ -79,6 +79,7 @@ class BidService:
         sort: SearchSortKey,
         page: int,
         q: str | None = None,
+        include_closed: bool = False,
     ) -> BidListResponse:
         """공고 검색(GET /bids/search).
 
@@ -93,18 +94,21 @@ class BidService:
         # 공백 없는 공고명이 통째로 빠진다.
         keyword = q.strip() if q else None
         keyword = keyword or None
-        # 마감 지난 공고는 노출하지 않는다(공용 경로와 동일 규칙).
-        # TODO(후속): include_closed 파라미터가 붙으면 여기서 None으로 분기한다.
         now_kst = datetime.now(_KST).replace(tzinfo=None)
+        # 기본은 마감 지난 공고를 제외한다(공용 경로와 동일 규칙). include_closed면
+        # 필터를 걸지 않되, 정렬은 활성을 앞에 둔다(repository._deadline_order 참고) —
+        # 안 그러면 이미 끝난 공고가 1페이지를 전부 차지한다.
+        clse_after = None if include_closed else now_kst
 
-        total = self._repo.search_count(category=category_value, clse_after=now_kst, q=keyword)
+        total = self._repo.search_count(category=category_value, clse_after=clse_after, q=keyword)
         offset = (page - 1) * SEARCH_PAGE_SIZE
         rows = self._repo.search_page(
             category=category_value,
             sort=sort_value,
             limit=SEARCH_PAGE_SIZE,
             offset=offset,
-            clse_after=now_kst,
+            now=now_kst,
+            clse_after=clse_after,
             q=keyword,
         )
         items = [BidListItem.model_validate(r) for r in rows]

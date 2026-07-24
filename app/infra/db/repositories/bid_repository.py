@@ -8,7 +8,7 @@ pending/partial/failed를 흘리면 안 되는 건 도메인 불변식이라, �
 """
 from datetime import datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.enums import QualStatus
@@ -100,6 +100,7 @@ class BidRepository:
         sort: str,
         limit: int,
         offset: int,
+        now: datetime,
         clse_after: datetime | None = None,
         q: str | None = None,
     ) -> list[Bid]:
@@ -107,7 +108,7 @@ class BidRepository:
 
         정렬 두 가지 — 어느 쪽이든 bid_id로 tie-break해 페이지 경계에서 행이 중복·
         누락되지 않게 한다(불안정 정렬이면 2페이지에 1페이지 행이 다시 나올 수 있다).
-          * deadline: 마감 임박순. bid_clse_dt ASC + NULLS LAST(마감 미정이 상단을 먹지 않게)
+          * deadline: 활성 → 마감 → 미정 (_deadline_order 참고)
           * recent  : 최신 등록순. bid_ntce_dt DESC + NULLS LAST(게시일 미상은 뒤로)
         """
         stmt = self._merged_base()
@@ -115,9 +116,31 @@ class BidRepository:
         if sort == "recent":
             order = (Bid.bid_ntce_dt.desc().nulls_last(), Bid.bid_id.asc())
         else:
-            order = (Bid.bid_clse_dt.asc().nulls_last(), Bid.bid_id.asc())
+            order = self._deadline_order(now)
         stmt = stmt.order_by(*order).limit(limit).offset(offset)
         return list(self._session.execute(stmt).scalars().all())
+
+    @staticmethod
+    def _deadline_order(now: datetime):
+        """마감 임박순 — 활성 → 마감 → 미정.
+
+        마감된 공고를 포함(include_closed)하면 단순 `bid_clse_dt ASC`로는 과거 날짜가
+        가장 작아 **이미 끝난 공고가 1페이지를 전부 차지한다.** 그래서 먼저 상태로
+        묶고(활성 0 / 마감 1 / 미정 2), 그 안에서 정렬한다.
+
+        묶음 안 정렬: 활성은 마감이 임박한 순, 마감된 건 최근에 끝난 순이 유용하다.
+        방향이 서로 반대라 epoch 부호를 뒤집어 하나의 오름차순 키로 합친다.
+
+        마감분을 제외할 때(기본)는 묶음 1이 비어 있어 결과가 기존과 동일하다.
+        """
+        bucket = case(
+            (Bid.bid_clse_dt.is_(None), 2),
+            (Bid.bid_clse_dt < now, 1),
+            else_=0,
+        )
+        epoch = func.extract("epoch", Bid.bid_clse_dt)
+        within = case((Bid.bid_clse_dt < now, -epoch), else_=epoch)
+        return (bucket.asc(), within.asc(), Bid.bid_id.asc())
 
     @staticmethod
     def _apply_search_filters(stmt, category, clse_after=None, q=None):
