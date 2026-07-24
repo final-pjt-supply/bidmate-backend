@@ -71,6 +71,34 @@ class FakeBidRepository:
         )
         return rows[offset : offset + limit]
 
+    # ── 검색 전용 경로 대역 ──────────────────────────────────────────
+    def _search_filtered(self, category, clse_after) -> list[Bid]:
+        out = self._rows
+        if category is not None:
+            out = [r for r in out if r.bid_category == category]
+        if clse_after is not None:
+            out = [r for r in out if r.bid_clse_dt is None or r.bid_clse_dt >= clse_after]
+        return out
+
+    def search_count(self, *, category, clse_after=None) -> int:
+        return len(self._search_filtered(category, clse_after))
+
+    def search_page(self, *, category, sort, limit, offset, clse_after=None) -> list[Bid]:
+        rows = self._search_filtered(category, clse_after)
+        if sort == "recent":
+            # bid_ntce_dt DESC NULLS LAST, then bid_id ASC (repository와 동일).
+            rows = sorted(rows, key=lambda r: r.bid_id)
+            rows = sorted(
+                rows,
+                key=lambda r: (r.bid_ntce_dt is None, -(r.bid_ntce_dt or datetime.min).timestamp()),
+            )
+        else:
+            rows = sorted(
+                rows,
+                key=lambda r: (r.bid_clse_dt is None, r.bid_clse_dt or datetime.max, r.bid_id),
+            )
+        return rows[offset : offset + limit]
+
     def get_by_bid_id(self, bid_id: str) -> Bid | None:
         return next((r for r in self._rows if r.bid_id == bid_id), None)
 

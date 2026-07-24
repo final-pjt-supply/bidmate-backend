@@ -5,7 +5,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.api.v1.schemas.bid import BidDetail, BidListItem, BidListResponse
-from app.domain.enums import BidCategory, BidSortKey
+from app.domain.enums import BidCategory, BidSortKey, SearchSortKey
 from app.domain.qualification import Qualification
 from app.infra.db.models.bid import Bid
 from app.infra.db.repositories.bid_repository import BidRepository
@@ -64,6 +64,38 @@ class BidService:
             clse_after=now_kst,
         )
         # 범위 밖 page는 rows=[]가 자연스럽게 나온다(200 + 빈 배열, 에러 아님).
+        items = [BidListItem.model_validate(r) for r in rows]
+        return BidListResponse(total=total, page=page, page_size=PAGE_SIZE, items=items)
+
+    def search_bids(
+        self,
+        *,
+        category: BidCategory | None,
+        sort: SearchSortKey,
+        page: int,
+    ) -> BidListResponse:
+        """공고 검색(GET /bids/search).
+
+        list_bids와 분리된 이유는 repository의 search_* 주석 참조 — 홈·추천이 쓰는
+        경로를 건드리지 않고 검색 필터를 계속 얹기 위해서다.
+
+        list_bids와 달리 sort가 실제로 결과를 바꾼다.
+        """
+        category_value = category.value if category is not None else None
+        sort_value = sort.value
+        # 마감 지난 공고는 노출하지 않는다(공용 경로와 동일 규칙).
+        # TODO(#25 후속): include_closed 파라미터가 붙으면 여기서 None으로 분기한다.
+        now_kst = datetime.now(_KST).replace(tzinfo=None)
+
+        total = self._repo.search_count(category=category_value, clse_after=now_kst)
+        offset = (page - 1) * PAGE_SIZE
+        rows = self._repo.search_page(
+            category=category_value,
+            sort=sort_value,
+            limit=PAGE_SIZE,
+            offset=offset,
+            clse_after=now_kst,
+        )
         items = [BidListItem.model_validate(r) for r in rows]
         return BidListResponse(total=total, page=page, page_size=PAGE_SIZE, items=items)
 

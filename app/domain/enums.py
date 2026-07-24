@@ -54,3 +54,14 @@ class BidSortKey(str, Enum):
     """
     SCORE = "score"
     DEADLINE = "deadline"
+
+
+class SearchSortKey(str, Enum):
+    """검색 화면(GET /bids/search) 정렬 키.
+
+    BidSortKey와 분리한 이유: 검색은 deadline·recent 둘만 노출하고 score는 받지
+    않는다(match_score가 전부 null이라 의미가 없다). 공용 BidSortKey에 recent를
+    더하면 홈·추천이 쓰는 GET /bids에서도 recent가 통과해버리므로, 계약을 섞지 않는다.
+    """
+    DEADLINE = "deadline"   # 마감 임박순(bid_clse_dt ASC)
+    RECENT = "recent"       # 최신 등록순(bid_ntce_dt DESC)
