@@ -17,6 +17,15 @@ from app.infra.db.models.bid import Bid
 _MERGED = QualStatus.MERGED.value
 
 
+def _escape_like(value: str) -> str:
+    """LIKE 와일드카드 이스케이프.
+
+    사용자가 친 `%`나 `_`가 패턴 문법으로 해석되면 "100%"를 찾을 때 엉뚱한 결과가
+    나온다. 이스케이프 문자 자체(`\\`)를 먼저 처리해야 이중 이스케이프가 안 생긴다.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class BidRepository:
     def __init__(self, session: Session):
         self._session = session
@@ -72,10 +81,16 @@ class BidRepository:
     # 늘어나는데(공고명·금액·낙찰방법·지역…), 공용 경로에 얹으면 필터 하나가 잘못돼도
     # 홈·추천이 함께 깨진다. merged 게이트·마감 필터가 두 벌이 되는 비용은 감수한다.
 
-    def search_count(self, *, category: str | None, clse_after: datetime | None = None) -> int:
+    def search_count(
+        self,
+        *,
+        category: str | None,
+        clse_after: datetime | None = None,
+        q: str | None = None,
+    ) -> int:
         """검색 필터 적용 후 총 건수."""
         stmt = select(func.count()).select_from(Bid).where(Bid.qual_status == _MERGED)
-        stmt = self._apply_search_filters(stmt, category, clse_after)
+        stmt = self._apply_search_filters(stmt, category, clse_after, q)
         return self._session.execute(stmt).scalar_one()
 
     def search_page(
@@ -86,6 +101,7 @@ class BidRepository:
         limit: int,
         offset: int,
         clse_after: datetime | None = None,
+        q: str | None = None,
     ) -> list[Bid]:
         """검색 결과 한 페이지.
 
@@ -95,7 +111,7 @@ class BidRepository:
           * recent  : 최신 등록순. bid_ntce_dt DESC + NULLS LAST(게시일 미상은 뒤로)
         """
         stmt = self._merged_base()
-        stmt = self._apply_search_filters(stmt, category, clse_after)
+        stmt = self._apply_search_filters(stmt, category, clse_after, q)
         if sort == "recent":
             order = (Bid.bid_ntce_dt.desc().nulls_last(), Bid.bid_id.asc())
         else:
@@ -104,13 +120,26 @@ class BidRepository:
         return list(self._session.execute(stmt).scalars().all())
 
     @staticmethod
-    def _apply_search_filters(stmt, category, clse_after=None):
-        """검색 경로 필터. 후속 이슈(#25 후속)에서 공고명·금액·낙찰방법 등이 여기 붙는다."""
+    def _apply_search_filters(stmt, category, clse_after=None, q=None):
+        """검색 경로 필터. 후속 이슈에서 금액·낙찰방법·지역 등이 여기 붙는다."""
         if category is not None:
             stmt = stmt.where(Bid.bid_category == category)
         # 마감 지난 공고 제외. 마감일 NULL은 "아직 안 닫힘"으로 보고 남긴다(공용 경로와 동일).
         if clse_after is not None:
             stmt = stmt.where(or_(Bid.bid_clse_dt >= clse_after, Bid.bid_clse_dt.is_(None)))
+        # 공고명·수요기관·공고기관 부분일치(대소문자 무시). 셋 중 하나만 걸려도 결과에 포함.
+        #
+        # 인덱스 없이 순차 스캔이다. 노출 대상이 1400여 건 규모라 지금은 충분하고,
+        # 느려지면 pg_trgm GIN 인덱스를 별도로 붙인다(공유 운영 DB라 협의 필요).
+        if q:
+            pattern = f"%{_escape_like(q)}%"
+            stmt = stmt.where(
+                or_(
+                    Bid.bid_ntce_nm.ilike(pattern, escape="\\"),
+                    Bid.dminstt_nm.ilike(pattern, escape="\\"),
+                    Bid.ntce_instt_nm.ilike(pattern, escape="\\"),
+                )
+            )
         return stmt
 
     def get_by_bid_id(self, bid_id: str) -> Bid | None:

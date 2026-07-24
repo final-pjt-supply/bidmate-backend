@@ -44,6 +44,11 @@ def search_bids(
         default=SearchSortKey.DEADLINE,
         description="정렬. deadline=마감 임박순, recent=최신 등록순. score는 받지 않는다.",
     ),
+    q: str | None = Query(
+        default=None,
+        max_length=100,
+        description="공고명·수요기관·공고기관 부분일치(대소문자 무시). 공백만 주면 미적용.",
+    ),
     page: int = Query(default=1, ge=1, description="1-based. 범위 밖이면 빈 배열."),
     service: BidService = Depends(get_bid_service),
     current_user: CurrentUser = Depends(get_current_user),
@@ -54,7 +59,7 @@ def search_bids(
     FastAPI가 정의 순서대로 매칭하므로 "search"가 bid_id로 먹혀 404가 난다.
     """
     _ = current_user   # 인증 게이트만 통과시킨다(검색은 아직 회사별 분기 없음).
-    return service.search_bids(category=category, sort=sort, page=page)
+    return service.search_bids(category=category, sort=sort, page=page, q=q)
 
 
 @router.get("/{bid_id}", response_model=BidDetail)

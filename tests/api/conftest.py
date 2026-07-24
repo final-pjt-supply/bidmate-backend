@@ -72,19 +72,29 @@ class FakeBidRepository:
         return rows[offset : offset + limit]
 
     # ── 검색 전용 경로 대역 ──────────────────────────────────────────
-    def _search_filtered(self, category, clse_after) -> list[Bid]:
+    def _search_filtered(self, category, clse_after, q=None) -> list[Bid]:
         out = self._rows
         if category is not None:
             out = [r for r in out if r.bid_category == category]
         if clse_after is not None:
             out = [r for r in out if r.bid_clse_dt is None or r.bid_clse_dt >= clse_after]
+        if q:
+            # ILIKE '%q%' 미러링 — 세 컬럼 OR, 대소문자 무시.
+            # 이스케이프는 SQL 문법 문제라 대역에서는 재현하지 않는다(리터럴 비교로 충분).
+            needle = q.lower()
+            out = [
+                r for r in out
+                if needle in (r.bid_ntce_nm or "").lower()
+                or needle in (r.dminstt_nm or "").lower()
+                or needle in (r.ntce_instt_nm or "").lower()
+            ]
         return out
 
-    def search_count(self, *, category, clse_after=None) -> int:
-        return len(self._search_filtered(category, clse_after))
+    def search_count(self, *, category, clse_after=None, q=None) -> int:
+        return len(self._search_filtered(category, clse_after, q))
 
-    def search_page(self, *, category, sort, limit, offset, clse_after=None) -> list[Bid]:
-        rows = self._search_filtered(category, clse_after)
+    def search_page(self, *, category, sort, limit, offset, clse_after=None, q=None) -> list[Bid]:
+        rows = self._search_filtered(category, clse_after, q)
         if sort == "recent":
             # bid_ntce_dt DESC NULLS LAST, then bid_id ASC (repository와 동일).
             rows = sorted(rows, key=lambda r: r.bid_id)
