@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>BidMate 에이전트 챗 데모</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --line:#dde3ea; --ink:#1c2733; --sub:#6b7a8c; --accent:#2563eb; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap { max-width:720px; margin:0 auto; padding:16px; display:flex; flex-direction:column; height:100vh; }
+  header { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding-bottom:10px; }
+  header h1 { font-size:18px; margin:0; }
+  header .sid { font-size:11px; color:var(--sub); word-break:break-all; }
+  .opts { display:flex; gap:8px; font-size:12px; color:var(--sub); padding-bottom:8px; flex-wrap:wrap; }
+  .opts label { display:flex; align-items:center; gap:4px; }
+  .opts input { border:1px solid var(--line); border-radius:6px; padding:4px 6px; font-size:12px; width:130px; }
+  #log { flex:1; overflow-y:auto; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:10px; }
+  .msg { max-width:85%; padding:9px 12px; border-radius:12px; font-size:14px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
+  .me { align-self:flex-end; background:var(--accent); color:#fff; border-bottom-right-radius:4px; }
+  .bot { align-self:flex-start; background:#eef2f7; border-bottom-left-radius:4px; }
+  .bot.clarify { background:#fff7e0; }
+  .bot.redirect { background:#e7f6ec; }
+  .bot.err { background:#fdecec; color:#8c2020; }
+  .tag { display:inline-block; font-size:10px; font-weight:bold; color:var(--sub); margin-bottom:4px; letter-spacing:.5px; }
+  .cite { margin-top:8px; border-top:1px dashed #c9d3df; padding-top:6px; font-size:11px; color:var(--sub); }
+  .cite b { color:var(--ink); }
+  .meta { align-self:center; font-size:11px; color:var(--sub); }
+  form { display:flex; gap:8px; padding-top:12px; }
+  #q { flex:1; border:1px solid var(--line); border-radius:10px; padding:11px 12px; font-size:14px; }
+  #send { border:0; background:var(--accent); color:#fff; border-radius:10px; padding:0 20px; font-size:14px; cursor:pointer; }
+  #send:disabled { opacity:.5; cursor:wait; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>BidMate 에이전트 챗 데모</h1>
+    <span class="sid" id="sid">세션 없음 (첫 메시지에 발급)</span>
+  </header>
+  <div class="opts">
+    <label>company_id <input id="company" value="C1"></label>
+    <label>entry_bid_id <input id="entry" placeholder="(선택) 공고 상세 진입"></label>
+    <label><input type="checkbox" id="reset" style="width:auto"> 다음 메시지를 새 세션으로</label>
+  </div>
+  <div id="log">
+    <div class="meta">B·C는 아직 패키지 스텁 — 답변 근거 데이터는 가짜(R26BK_STUB01)입니다.</div>
+  </div>
+  <form id="f">
+    <input id="q" placeholder="예: 대전 전기공사 공고 알려줘" autocomplete="off" autofocus>
+    <button id="send" type="submit">전송</button>
+  </form>
+</div>
+<script>
+const API = 'http://127.0.0.1:8000';
+let sessionId = null;
+const log = document.getElementById('log');
+
+function add(cls, html) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  d.innerHTML = html;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+  return d;
+}
+const esc = s => (s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+document.getElementById('f').addEventListener('submit', async e => {
+  e.preventDefault();
+  const q = document.getElementById('q').value.trim();
+  if (!q) return;
+  if (document.getElementById('reset').checked) { sessionId = null; document.getElementById('reset').checked = false; }
+  add('me', esc(q));
+  document.getElementById('q').value = '';
+  const btn = document.getElementById('send');
+  btn.disabled = true;
+  const t0 = performance.now();
+  const wait = add('bot', '<span class="tag">…</span>생각 중 (Bedrock 호출, 수 초 걸릴 수 있음)');
+  try {
+    const body = { query: q, company_id: document.getElementById('company').value || 'C1' };
+    if (sessionId) body.session_id = sessionId;
+    const entry = document.getElementById('entry').value.trim();
+    if (entry) body.entry_bid_id = entry;
+    const r = await fetch(API + '/agent/chat', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    const sec = ((performance.now() - t0) / 1000).toFixed(1);
+    if (!r.ok) {
+      const text = await r.text();
+      wait.className = 'msg bot err';
+      wait.innerHTML = `<span class="tag">HTTP ${r.status} · ${sec}s</span>` + esc(text.slice(0, 500));
+      return;
+    }
+    const d = await r.json();
+    sessionId = d.session_id;
+    document.getElementById('sid').textContent = 'session: ' + d.session_id;
+    let cls = 'bot', tag = `ANSWER · ${sec}s`, main = esc(d.answer);
+    if (d.action === 'clarify') { cls = 'bot clarify'; tag = `CLARIFY · ${sec}s`; main = esc(d.clarify_message); }
+    if (d.action === 'redirect') {
+      cls = 'bot redirect'; tag = `REDIRECT · ${sec}s`;
+      const f = Object.entries(d.redirect_filters || {}).filter(([,v]) => v != null)
+        .map(([k,v]) => `${k}=${JSON.stringify(v)}`).join(', ');
+      main = '추천 화면 이동 (필터: ' + esc(f || '없음') + ')';
+    }
+    let cites = '';
+    if (d.citations && d.citations.length) {
+      cites = '<div class="cite"><b>근거 ' + d.citations.length + '건</b><br>' +
+        d.citations.map(c => esc(`[${c.bid_id}#${c.chunk_idx}] ${c.text.slice(0, 80)}…`)).join('<br>') + '</div>';
+    }
+    wait.className = 'msg ' + cls;
+    wait.innerHTML = `<span class="tag">${tag}</span>` + main + cites;
+  } catch (err) {
+    wait.className = 'msg bot err';
+    wait.innerHTML = '<span class="tag">FETCH 실패</span>' + esc(String(err)) +
+      '<br>백엔드(127.0.0.1:8000)가 떠 있는지, 이 페이지를 http://localhost:3000 으로 열었는지 확인하세요.';
+  } finally {
+    btn.disabled = false;
+    document.getElementById('q').focus();
+  }
+});
+</script>
+</body>
+</html>
