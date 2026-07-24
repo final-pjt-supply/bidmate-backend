@@ -12,9 +12,11 @@ from dataclasses import dataclass
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.agents.session_store import get_session_store
 from app.infra.db.repositories.bid_repository import BidRepository
 from app.infra.db.session import get_session
 from app.infra.s3.event_sink import get_event_sink
+from app.services.agent_chat_service import AgentChatService
 from app.services.bid_service import BidService
 from app.services.event_service import EventService
 
@@ -50,3 +52,8 @@ def get_bid_service(db: Session = Depends(get_db)) -> BidService:
 def get_event_service() -> EventService:
     # 이벤트는 RDS가 아니라 S3(NDJSON)로 적재 — 분석을 운영 DB에서 분리. DB 세션 불필요.
     return EventService(get_event_sink())
+
+
+def get_agent_chat_service() -> AgentChatService:
+    # 세션은 인메모리(EC2 상시 프로세스 전제, ADR 0005) — DB 세션 불필요.
+    return AgentChatService(get_session_store())
