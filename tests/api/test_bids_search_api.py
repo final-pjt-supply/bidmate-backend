@@ -35,7 +35,8 @@ def test_search_returns_same_shape_as_list(client_with_rows):
     body = res.json()
     # 응답 계약은 GET /bids와 동일해야 한다(프론트가 같은 타입을 쓴다).
     assert set(body) == {"total", "page", "page_size", "items"}
-    assert body["page_size"] == 20
+    # 검색은 24 — 프론트 목록이 3열 그리드라 20이면 마지막 줄이 어긋난다.
+    assert body["page_size"] == 24
     assert set(body["items"][0]) == {
         "bid_id", "bid_ntce_nm", "dminstt_nm", "bid_category",
         "sucsfbid_mthd_nm", "bid_clse_dt", "bdgt_amt",
@@ -164,6 +165,25 @@ def test_q_combines_with_category(client_with_rows):
 def test_q_too_long_is_422(client_with_rows):
     client = client_with_rows(_q_rows())
     assert client.get("/bids/search?q=" + "가" * 101).status_code == 422
+
+
+def test_list_endpoint_keeps_page_size_20(client_with_rows):
+    """홈·추천이 쓰는 GET /bids는 응답 계약(확정본)대로 20을 유지한다."""
+    client = client_with_rows([make_bid()])
+    assert client.get("/bids").json()["page_size"] == 20
+
+
+def test_search_paging_uses_24_per_page(client_with_rows):
+    """25건이면 1페이지 24건 + 2페이지 1건. offset 계산이 24 기준인지 확인."""
+    rows = [make_bid(bid_id=f"b{i:02d}_00", bid_ntce_no=f"b{i:02d}") for i in range(25)]
+    client = client_with_rows(rows)
+    p1 = client.get("/bids/search").json()
+    p2 = client.get("/bids/search?page=2").json()
+    assert p1["total"] == 25 and len(p1["items"]) == 24
+    assert len(p2["items"]) == 1
+    # 경계에서 행이 중복·누락되지 않아야 한다.
+    ids = [i["bid_id"] for i in p1["items"]] + [i["bid_id"] for i in p2["items"]]
+    assert len(set(ids)) == 25
 
 
 def test_list_endpoint_still_rejects_recent(client_with_rows):

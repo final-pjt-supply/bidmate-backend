@@ -10,7 +10,12 @@ from app.domain.qualification import Qualification
 from app.infra.db.models.bid import Bid
 from app.infra.db.repositories.bid_repository import BidRepository
 
-PAGE_SIZE = 20   # 명세상 고정
+PAGE_SIZE = 20   # 명세상 고정 — 홈·추천이 쓰는 GET /bids. 응답 계약(확정본) 값이라 바꾸지 않는다.
+# 검색 화면 전용. 프론트 목록이 3열 그리드라 20이면 마지막 줄에 2개만 남는다.
+# 24는 2·3·4·6열에 모두 나눠떨어져 열 수가 바뀌어도 어긋나지 않는다.
+# GET /bids/search는 확정본 밖의 새 엔드포인트라 이 값은 계약 변경이 아니다.
+# 화면마다 다른 크기가 필요해지면 page_size 파라미터(ge=1, le=100)를 연다.
+SEARCH_PAGE_SIZE = 24
 _KST = timezone(timedelta(hours=9))   # 한국 표준시(DST 없음). DB는 KST naive.
 
 
@@ -93,17 +98,17 @@ class BidService:
         now_kst = datetime.now(_KST).replace(tzinfo=None)
 
         total = self._repo.search_count(category=category_value, clse_after=now_kst, q=keyword)
-        offset = (page - 1) * PAGE_SIZE
+        offset = (page - 1) * SEARCH_PAGE_SIZE
         rows = self._repo.search_page(
             category=category_value,
             sort=sort_value,
-            limit=PAGE_SIZE,
+            limit=SEARCH_PAGE_SIZE,
             offset=offset,
             clse_after=now_kst,
             q=keyword,
         )
         items = [BidListItem.model_validate(r) for r in rows]
-        return BidListResponse(total=total, page=page, page_size=PAGE_SIZE, items=items)
+        return BidListResponse(total=total, page=page, page_size=SEARCH_PAGE_SIZE, items=items)
 
     def get_bid(self, bid_id: str, *, company_id: str | None = None) -> BidDetail:
         row = self._repo.get_by_bid_id(bid_id)
