@@ -1,2 +1,3 @@
-# LLM 판정 에이전트 자리(SQS+Lambda 비동기). 이번 읽기 전용 API 범위 밖 —
-# match_score/match를 채우는 로직이 여기 붙는다. 지금은 빈 패키지로만 둔다.
+# -*- coding: utf-8 -*-
+# 에이전트 연결 코드(ADR 0005) — 세션 스토어·B/C 어댑터. 에이전트 로직 자체는
+# bidmate-agents 패키지(import명 agents)에 있고, 여기는 백엔드 쪽 접점만 둔다.
