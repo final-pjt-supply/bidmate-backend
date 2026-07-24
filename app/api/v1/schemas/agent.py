@@ -9,11 +9,12 @@ session_context만 뺀다 — 왕복 규약(ADR 0005)상 컨텍스트는 서버(
 from typing import Literal
 
 from agents.schemas import Citation, Filters
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AgentChatRequest(BaseModel):
-    query: str
+    # 길이 제한은 비용 방어를 겸한다 — 빈/초장문 질의가 LLM(Bedrock)까지 가지 않게.
+    query: str = Field(min_length=1, max_length=500)
     # 인증(Cognito JWT) 미구현 동안 프론트가 직접 보낸다. 인증이 붙으면
     # CurrentUser.company_id로 옮기고 이 필드는 제거한다(deps.py ★ 참고).
     company_id: str

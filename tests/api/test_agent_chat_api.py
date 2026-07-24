@@ -98,3 +98,31 @@ def test_query_is_required(client_with_runner):
     client, _ = client_with_runner([])
     r = client.post("/agent/chat", json={"company_id": "C1"})
     assert r.status_code == 422
+
+
+def test_empty_query_is_422(client_with_runner):
+    client, runner = client_with_runner([])
+    r = client.post("/agent/chat", json={"query": "", "company_id": "C1"})
+    assert r.status_code == 422
+    assert runner.requests == []           # LLM까지 가지 않는다(비용 방어)
+
+
+def test_too_long_query_is_422(client_with_runner):
+    client, runner = client_with_runner([])
+    r = client.post("/agent/chat", json={"query": "가" * 501, "company_id": "C1"})
+    assert r.status_code == 422
+    assert runner.requests == []
+
+
+def test_agent_failure_maps_to_502(client_with_runner):
+    """Bedrock 장애 등 에이전트 실패를 맨몸 500 대신 502+메시지로 내린다 —
+    프론트가 '일시 오류, 재시도' UI를 만들 수 있는 규약."""
+    def broken_runner(req):
+        raise RuntimeError("Bedrock down")
+
+    client, _ = client_with_runner([])
+    service = AgentChatService(InMemorySessionStore(), broken_runner)
+    app.dependency_overrides[get_agent_chat_service] = lambda: service
+    r = client.post("/agent/chat", json={"query": "질문", "company_id": "C1"})
+    assert r.status_code == 502
+    assert "다시 시도" in r.json()["detail"]
