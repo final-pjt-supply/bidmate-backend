@@ -75,6 +75,35 @@ alembic revision --autogenerate -m "설명"   # 신규 마이그레이션
 개발용 EC2(uvicorn/systemd) 절차는 [deploy/README.md](deploy/README.md) 참조. 정식 배포
 (Lambda + API Gateway)는 이후 단계.
 
+## CI
+
+`main` 대상 PR과 `main` push에서 GitHub Actions가 Python 3.12 기준으로 다음을 검증한다.
+
+- 전체 Python 소스 컴파일
+- `agents.run` 및 FastAPI 앱 import
+- `pytest` 테스트 스위트(`integration` marker가 붙은 로컬 Postgres 테스트는 제외)
+
+백엔드는 private `bidmate-ai-agent`를 Python 패키지로 설치하므로 저장소 Actions secret
+`AGENT_REPO_TOKEN`이 필요하다. 토큰은 `bidmate-ai-agent` 한 저장소에만 접근 가능한
+fine-grained PAT로 만들고 `Contents: Read` 권한만 부여한다. AWS·RDS·Bedrock 자격증명은
+CI에 넣지 않는다.
+
+로컬에서 같은 검증을 실행하려면:
+
+```bash
+python -m pip install -r app/requirements.txt
+python -m compileall -q app tests
+python -c "import agents.run"
+python -c "from app.main import app; assert app.title == 'BidMate API'"
+python -m pytest -q -m "not integration" --maxfail=1
+```
+
+로컬 PostgreSQL 통합 테스트는 DB를 준비한 뒤 별도로 실행한다.
+
+```bash
+python -m pytest -q -m integration
+```
+
 ## 규칙
 
 커밋·브랜치 컨벤션은 [Github_Convention.md](Github_Convention.md), 이슈/PR은

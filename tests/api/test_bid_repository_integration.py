@@ -27,6 +27,8 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.infra.db.repositories.bid_repository import BidRepository
 
+pytestmark = pytest.mark.integration
+
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 _PROD_DB_NAMES = {"bidmate"}   # 운영 RDS DB명(template.yaml). 쓰기 테스트 절대 금지.
 
