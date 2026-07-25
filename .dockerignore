@@ -1,8 +1,14 @@
 .git/
+.github/
+.env
+.env.*
+.venv/
+venv/
 .aws-sam/
 batch-reports/
 **/__pycache__/
 **/*.pyc
 **/tests/
 **/.pytest_cache/
+PORTFOLIO_LOG.md
 samconfig.toml
