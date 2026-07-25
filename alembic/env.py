@@ -22,6 +22,7 @@ from app.infra.db.session import Base
 import app.infra.db.models.bid  # noqa: F401
 import app.infra.db.models.company  # noqa: F401
 import app.infra.db.models.company_profile  # noqa: F401
+import app.infra.db.models.match_result  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
@@ -32,7 +33,7 @@ target_metadata = Base.metadata
 # 파이프라인 팀 소유 — Alembic이 절대 건드리지 않는다.
 _PIPELINE_OWNED_TABLES = {"bid_table", "bid_attachments"}
 
-# 에이전트팀이 공유 RDS에 직접 생성한 회사 자격요건 프로필 테이블(coexist).
+# 외부(에이전트팀/매칭 배치)가 공유 RDS에 직접 생성·적재하는 테이블(coexist).
 # 우리 ORM은 읽기 매핑(컬럼 일부만)이라 관리 대상에 넣으면 autogenerate가
 # 매핑 안 한 컬럼을 DROP하려 든다 — bid_table과 같은 이유로 시야에서 제외한다.
 # (DDL 소유를 백엔드로 넘기기로 팀 합의가 되면 그때 마이그레이션으로 편입한다.)
@@ -40,6 +41,7 @@ _AGENT_OWNED_TABLES = {
     "company_qualifications", "company_regions", "company_licenses",
     "company_items", "company_certs", "company_personnel",
     "company_capacity_evals", "company_performance_records",
+    "match_results",   # 배치(normalizer)가 사전계산 적재
 }
 
 _EXCLUDED_TABLES = _PIPELINE_OWNED_TABLES | _AGENT_OWNED_TABLES
