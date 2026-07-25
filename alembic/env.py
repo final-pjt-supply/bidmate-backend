@@ -24,6 +24,7 @@ from app.infra.db.session import Base
 #   반드시 여기도 함께 등록할 것.
 import app.infra.db.models.bid  # noqa: F401
 import app.infra.db.models.company  # noqa: F401
+import app.infra.db.models.company_profile  # noqa: F401
 import app.infra.db.models.scrap  # noqa: F401
 
 config = context.config
@@ -32,15 +33,26 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-# 컬럼 일부만 매핑한 테이블 — 모델에 있어도 관리 대상에서 뺀다.
-# (bid_table은 파이프라인 소유이고 우리 ORM은 조회용으로 일부 컬럼만 매핑했다.
-#  관리 대상에 넣으면 매핑 안 한 컬럼을 DROP하려 든다.)
+# 컬럼 일부만 매핑했거나(bid_table), 다른 팀이 소유해 coexist만 하는 테이블 —
+# Base.metadata에 모델이 등록돼 있어도 관리 대상에서 뺀다.
 _PARTIALLY_MAPPED_TABLES = {"bid_table"}
+
+# 에이전트팀이 공유 RDS에 직접 생성한 회사 자격요건 프로필 테이블(coexist).
+# 우리 ORM은 읽기 매핑(컬럼 일부만)이라 관리 대상에 넣으면 autogenerate가
+# 매핑 안 한 컬럼을 DROP하려 든다 — bid_table과 같은 이유로 시야에서 제외한다.
+# (DDL 소유를 백엔드로 넘기기로 팀 합의가 되면 그때 마이그레이션으로 편입한다.)
+_AGENT_OWNED_TABLES = {
+    "company_qualifications", "company_regions", "company_licenses",
+    "company_items", "company_certs", "company_personnel",
+    "company_capacity_evals", "company_performance_records",
+}
+
+_UNMANAGED_EVEN_IF_MAPPED = _PARTIALLY_MAPPED_TABLES | _AGENT_OWNED_TABLES
 
 
 def _managed(table_name: str) -> bool:
     """이 레포가 마이그레이션으로 관리하는 테이블인가."""
-    if table_name in _PARTIALLY_MAPPED_TABLES:
+    if table_name in _UNMANAGED_EVEN_IF_MAPPED:
         return False
     # 화이트리스트 — 모델로 매핑한 것만 관리한다. 목록을 손으로 유지하지 않으므로
     # DB에 새 테이블이 생겨도(다른 팀이 raw SQL로 추가) 자동으로 보호되고,
@@ -49,7 +61,8 @@ def _managed(table_name: str) -> bool:
 
 
 def include_object(obj, name, type_, reflected, compare_to) -> bool:
-    """모델로 매핑하지 않은 테이블(과 그 하위 객체)을 autogenerate/비교에서 제외."""
+    """모델로 매핑하지 않았거나, 매핑돼 있어도 외부 소유(coexist)인 테이블(과 그
+    하위 객체)을 autogenerate/비교에서 제외."""
     if type_ == "table":
         return _managed(name)
     # 인덱스/제약 등 테이블에 딸린 객체도, 소속 테이블이 제외 대상이면 함께 제외.
