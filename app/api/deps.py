@@ -21,6 +21,7 @@ from app.infra.db.repositories.company_profile_repository import (
     CompanyProfileRepository,
 )
 from app.infra.db.repositories.company_repository import CompanyRepository
+from app.infra.db.repositories.master_repository import MasterRepository
 from app.infra.db.repositories.match_repository import MatchRepository
 from app.infra.db.repositories.scrap_repository import ScrapRepository
 from app.infra.db.session import get_session
@@ -134,7 +135,8 @@ def get_scrap_service(db: Session = Depends(get_db)) -> ScrapService:
 def get_company_profile_service(
     db: Session = Depends(get_db),
 ) -> CompanyProfileService:
-    return CompanyProfileService(CompanyProfileRepository(db))
+    # 입력(PUT)은 마스터에서 name을 채우고 코드를 검증하므로 MasterRepository도 준다.
+    return CompanyProfileService(CompanyProfileRepository(db), MasterRepository(db))
 
 
 def get_match_service(db: Session = Depends(get_db)) -> MatchService:

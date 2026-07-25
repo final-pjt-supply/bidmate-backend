@@ -6,8 +6,9 @@
 `_name`은 DB에 비정규화 저장돼 있어 그대로 노출한다(마스터 조인 없음).
 """
 from datetime import date
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class _Section(BaseModel):
@@ -80,3 +81,75 @@ class ProfileResponse(BaseModel):
     personnel: list[PersonnelOut] = []
     capacity_evals: list[CapacityEvalOut] = []
     performance_records: list[PerformanceRecordOut] = []
+
+
+# ── 입력(PUT /me/profile) ─────────────────────────────────────────────
+# 클라는 code만 보낸다 — _name은 서버가 마스터 조회로 채운다(신뢰경계 서버).
+# extra="forbid": 클라가 region_name 등 파생값을 밀어넣지 못하게 막는다(422).
+class _Input(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+# 필수/선택·허용값은 DB 제약(NOT NULL·CHECK)에 맞춘다 — 여기서 안 막으면 insert가
+# 500(CHECK 위반)난다. 허용값이 정해진 컬럼은 Literal로 422로 돌린다.
+class QualificationIn(_Input):
+    company_size: Literal["small", "medium", "mid_large", "conglomerate"]   # CHECK
+    credit_rating: str | None = Field(default=None, max_length=10)   # DB: varchar(10)
+
+
+class RegionIn(_Input):
+    region_code: str = Field(min_length=1, max_length=20)
+    region_type: Literal["hq", "branch"]   # CHECK (본점/지사)
+
+
+class LicenseIn(_Input):
+    license_code: str = Field(min_length=1, max_length=20)
+
+
+class ItemIn(_Input):
+    item_code: str = Field(min_length=1, max_length=20)
+    has_direct_production: bool = False   # NOT NULL(기본 false)
+    direct_prod_valid_until: date | None = None
+
+
+class CertIn(_Input):
+    cert_code: str = Field(min_length=1, max_length=20)
+    valid_until: date | None = None
+
+
+class PersonnelIn(_Input):
+    qual_code: str = Field(min_length=1, max_length=20)
+    headcount: int = Field(gt=0)   # NOT NULL, CHECK(headcount > 0)
+
+
+class CapacityEvalIn(_Input):
+    license_code: str = Field(min_length=1, max_length=20)
+    eval_amount: int = Field(ge=0)   # NOT NULL, 원 단위
+    eval_year: int | None = Field(default=None, ge=1900, le=2100)
+
+
+class PerformanceRecordIn(_Input):
+    # field_code는 license_master를 참조한다(FK) — 실적 분야코드 = 면허/업종코드.
+    # 그래서 field_name도 서버가 license_master에서 채운다(다른 섹션과 동일). 선택.
+    contract_name: str = Field(min_length=1, max_length=300)   # NOT NULL
+    contract_amt: int = Field(ge=0)                            # NOT NULL
+    end_date: date                                            # NOT NULL
+    field_code: str | None = Field(default=None, max_length=20)
+
+
+class ProfileUpsertRequest(BaseModel):
+    """전체 프로필 저장(full replace). 회원가입 폼이 완성된 프로필을 한 번에 보낸다.
+
+    누락한(=보내지 않은) 섹션은 빈 값으로 본다 — 이 요청이 곧 '원하는 최종 상태'다.
+    같은 섹션에 code 중복이 있으면 422(테이블 PK가 (company_id, code)라 불가).
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    qualification: QualificationIn | None = None
+    regions: list[RegionIn] = []
+    licenses: list[LicenseIn] = []
+    items: list[ItemIn] = []
+    certs: list[CertIn] = []
+    personnel: list[PersonnelIn] = []
+    capacity_evals: list[CapacityEvalIn] = []
+    performance_records: list[PerformanceRecordIn] = []
