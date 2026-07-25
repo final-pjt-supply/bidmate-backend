@@ -96,7 +96,8 @@ sudo bash deploy/bootstrap-container-runtime.sh
 ## 배포와 롤백
 
 이미지는 `linux/arm64` 단일 플랫폼으로 빌드하고 `latest` 대신 40자리 Git commit SHA만
-태그한다. 배포 스크립트는 다음 순서로 작동한다.
+태그한다. 같은 커밋을 재배포할 때 ECR에 SHA 이미지가 이미 있으면 immutable 태그를
+덮어쓰지 않고 기존 이미지를 재사용한다. 배포 스크립트는 다음 순서로 작동한다.
 
 1. EC2 인스턴스 역할로 ECR 로그인 후 정확한 SHA 이미지를 pull한다.
 2. 후보 컨테이너를 `127.0.0.1:18000`에 실행해 `/health`를 확인한다.
