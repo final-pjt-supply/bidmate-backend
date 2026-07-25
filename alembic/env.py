@@ -22,6 +22,7 @@ from app.infra.db.session import Base
 import app.infra.db.models.bid  # noqa: F401
 import app.infra.db.models.company  # noqa: F401
 import app.infra.db.models.company_profile  # noqa: F401
+import app.infra.db.models.master  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
@@ -40,6 +41,9 @@ _AGENT_OWNED_TABLES = {
     "company_qualifications", "company_regions", "company_licenses",
     "company_items", "company_certs", "company_personnel",
     "company_capacity_evals", "company_performance_records",
+    # 표준코드 마스터(에이전트팀 적재, 읽기 전용)
+    "region_master", "license_master", "item_code_master",
+    "personnel_grade_master", "cert_master",
 }
 
 _EXCLUDED_TABLES = _PIPELINE_OWNED_TABLES | _AGENT_OWNED_TABLES

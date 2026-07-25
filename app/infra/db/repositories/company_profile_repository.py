@@ -6,7 +6,7 @@
 """
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.infra.db.models.company_profile import (
     CompanyCapacityEval,
@@ -60,3 +60,46 @@ class CompanyProfileRepository:
                 CompanyPerformanceRecord, company_id, CompanyPerformanceRecord.record_id
             ),
         )
+
+    # 전체 테이블 순서(삭제/삽입 공용). qualification은 1:1이라 별도 취급.
+    _CHILD_MODELS = (
+        CompanyRegion, CompanyLicense, CompanyItem, CompanyCert,
+        CompanyPersonnel, CompanyCapacityEval, CompanyPerformanceRecord,
+    )
+
+    def replace_profile(
+        self,
+        company_id: int,
+        *,
+        qualification: CompanyQualification | None,
+        regions: list[CompanyRegion],
+        licenses: list[CompanyLicense],
+        items: list[CompanyItem],
+        certs: list[CompanyCert],
+        personnel: list[CompanyPersonnel],
+        capacity_evals: list[CompanyCapacityEval],
+        performance_records: list[CompanyPerformanceRecord],
+    ) -> None:
+        """회사 프로필 전체 교체(full replace) — 한 트랜잭션.
+
+        기존 회사 행을 모두 지우고 넘어온 것으로 다시 채운다. 실패 시 전부 롤백돼
+        절반만 저장되는 일이 없다(원자성). 넘어온 ORM 인스턴스는 이미 company_id·
+        _name까지 채워져 있다(서비스 소관).
+        """
+        s = self._session
+        try:
+            # 삭제: 자식 + qualification 모두 회사 스코프로.
+            for model in (*self._CHILD_MODELS, CompanyQualification):
+                s.execute(delete(model).where(model.company_id == company_id))
+            # 삽입.
+            if qualification is not None:
+                s.add(qualification)
+            for rows in (regions, licenses, items, certs, personnel,
+                         capacity_evals, performance_records):
+                s.add_all(rows)
+            s.commit()
+        except Exception:
+            # DB 제약(FK·CHECK 등) 위반 시 세션을 되돌린다 — 절반만 반영되거나
+            # 다음 요청이 오염된 세션을 물려받지 않게(서비스가 IntegrityError→422).
+            s.rollback()
+            raise

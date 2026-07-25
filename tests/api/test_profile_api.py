@@ -109,3 +109,122 @@ def test_company_isolation(profile_client):
     assert c.get("/me/profile").json()["licenses"]        # 9001은 데이터 있음
     as_company("99999")
     assert c.get("/me/profile").json()["licenses"] == []  # 다른 회사엔 없음
+
+
+# ── 입력(PUT /me/profile) ─────────────────────────────────────────────
+class FakeMasterRepo:
+    REGION = {"11": "서울특별시"}
+    LICENSE = {"0037": "전기공사업", "0040": "정보통신공사업"}
+    ITEM = {"1234": "노트북"}
+    CERT = {"C1": "ISO9001"}
+    PERSONNEL = {"Q1": "정보처리기사"}
+
+    def _pick(self, table, codes):
+        return {c: table[c] for c in set(codes) if c in table}
+
+    def region_names(self, codes):
+        return self._pick(self.REGION, codes)
+
+    def license_names(self, codes):
+        return self._pick(self.LICENSE, codes)
+
+    def item_names(self, codes):
+        return self._pick(self.ITEM, codes)
+
+    def cert_names(self, codes):
+        return self._pick(self.CERT, codes)
+
+    def personnel_names(self, codes):
+        return self._pick(self.PERSONNEL, codes)
+
+
+class FakeWriteRepo:
+    def __init__(self):
+        self.saved: ProfileRows | None = None
+
+    def replace_profile(self, company_id, *, qualification, regions, licenses,
+                        items, certs, personnel, capacity_evals, performance_records):
+        for i, r in enumerate(performance_records, start=1):
+            r.record_id = i   # DB 시퀀스(record_id) 흉내
+        self.saved = ProfileRows(
+            qualification, regions, licenses, items, certs, personnel,
+            capacity_evals, performance_records,
+        )
+
+    def load(self, company_id):
+        return self.saved or ProfileRows(None, [], [], [], [], [], [], [])
+
+
+@pytest.fixture
+def write_client():
+    service = CompanyProfileService(FakeWriteRepo(), FakeMasterRepo())
+
+    def _make(company_id: str = "9001") -> TestClient:
+        app.dependency_overrides[get_company_profile_service] = lambda: service
+        app.dependency_overrides[get_authenticated_user] = lambda: SimpleNamespace(
+            company_id=company_id, email=None
+        )
+        return TestClient(app)
+
+    yield _make
+    app.dependency_overrides.clear()
+
+
+def test_put_fills_names_from_master(write_client):
+    """클라는 code만 보내고 서버가 마스터에서 name을 채운다."""
+    c = write_client()
+    body = {
+        "qualification": {"company_size": "medium"},
+        "regions": [{"region_code": "11", "region_type": "hq"}],
+        "licenses": [{"license_code": "0037"}],
+    }
+    r = c.put("/me/profile", json=body)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["regions"][0]["region_name"] == "서울특별시"
+    assert data["licenses"][0]["license_name"] == "전기공사업"
+    assert data["qualification"]["company_size"] == "medium"
+
+
+def test_put_empty_profile_ok(write_client):
+    """모든 섹션 선택 — 빈 프로필도 200."""
+    c = write_client()
+    r = c.put("/me/profile", json={})
+    assert r.status_code == 200
+    assert r.json()["licenses"] == [] and r.json()["qualification"] is None
+
+
+def test_put_unknown_code_is_422(write_client):
+    c = write_client()
+    r = c.put("/me/profile", json={"licenses": [{"license_code": "9999"}]})
+    assert r.status_code == 422
+
+
+def test_put_duplicate_code_is_422(write_client):
+    c = write_client()
+    r = c.put("/me/profile", json={
+        "licenses": [{"license_code": "0037"}, {"license_code": "0037"}]
+    })
+    assert r.status_code == 422
+
+
+def test_put_forbids_client_supplied_name(write_client):
+    """서버가 채우는 name을 클라가 밀어넣으면 거부(extra=forbid)."""
+    c = write_client()
+    r = c.put("/me/profile", json={
+        "regions": [{"region_code": "11", "region_type": "hq", "region_name": "해킹"}]
+    })
+    assert r.status_code == 422
+
+
+def test_put_missing_notnull_infield_is_422(write_client):
+    """region_type은 NOT NULL → 행을 넣으면 필수."""
+    c = write_client()
+    r = c.put("/me/profile", json={"regions": [{"region_code": "11"}]})
+    assert r.status_code == 422
+
+
+def test_put_requires_login(write_client):
+    write_client()
+    app.dependency_overrides.pop(get_authenticated_user, None)
+    assert TestClient(app).put("/me/profile", json={}).status_code == 401
