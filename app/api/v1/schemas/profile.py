@@ -94,7 +94,7 @@ class _Input(BaseModel):
 # 500(CHECK 위반)난다. 허용값이 정해진 컬럼은 Literal로 422로 돌린다.
 class QualificationIn(_Input):
     company_size: Literal["small", "medium", "mid_large", "conglomerate"]   # CHECK
-    credit_rating: str | None = Field(default=None, max_length=20)
+    credit_rating: str | None = Field(default=None, max_length=10)   # DB: varchar(10)
 
 
 class RegionIn(_Input):
