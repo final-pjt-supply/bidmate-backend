@@ -18,10 +18,12 @@ from app.config import get_settings
 from app.infra.auth.cognito import TokenError, verify_id_token
 from app.infra.db.repositories.bid_repository import BidRepository
 from app.infra.db.repositories.company_repository import CompanyRepository
+from app.infra.db.repositories.scrap_repository import ScrapRepository
 from app.infra.db.session import get_session
 from app.infra.s3.event_sink import get_event_sink
 from app.services.bid_service import BidService
 from app.services.event_service import EventService
+from app.services.scrap_service import ScrapService
 
 
 @dataclass(frozen=True)
@@ -117,6 +119,10 @@ def _verify_or_401(token: str):
 
 def get_bid_service(db: Session = Depends(get_db)) -> BidService:
     return BidService(BidRepository(db))
+
+
+def get_scrap_service(db: Session = Depends(get_db)) -> ScrapService:
+    return ScrapService(ScrapRepository(db))
 
 
 def get_event_service() -> EventService:
