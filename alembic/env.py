@@ -21,6 +21,7 @@ from app.infra.db.session import Base
 # (앞으로 company/match_results 모델을 추가하면 여기서 함께 import한다.)
 import app.infra.db.models.bid  # noqa: F401
 import app.infra.db.models.company  # noqa: F401
+import app.infra.db.models.company_profile  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
@@ -31,14 +32,26 @@ target_metadata = Base.metadata
 # 파이프라인 팀 소유 — Alembic이 절대 건드리지 않는다.
 _PIPELINE_OWNED_TABLES = {"bid_table", "bid_attachments"}
 
+# 에이전트팀이 공유 RDS에 직접 생성한 회사 자격요건 프로필 테이블(coexist).
+# 우리 ORM은 읽기 매핑(컬럼 일부만)이라 관리 대상에 넣으면 autogenerate가
+# 매핑 안 한 컬럼을 DROP하려 든다 — bid_table과 같은 이유로 시야에서 제외한다.
+# (DDL 소유를 백엔드로 넘기기로 팀 합의가 되면 그때 마이그레이션으로 편입한다.)
+_AGENT_OWNED_TABLES = {
+    "company_qualifications", "company_regions", "company_licenses",
+    "company_items", "company_certs", "company_personnel",
+    "company_capacity_evals", "company_performance_records",
+}
+
+_EXCLUDED_TABLES = _PIPELINE_OWNED_TABLES | _AGENT_OWNED_TABLES
+
 
 def include_object(obj, name, type_, reflected, compare_to) -> bool:
-    """파이프라인 소유 테이블(과 그 하위 객체)을 autogenerate/비교에서 제외."""
-    if type_ == "table" and name in _PIPELINE_OWNED_TABLES:
+    """외부 소유 테이블(과 그 하위 객체)을 autogenerate/비교에서 제외."""
+    if type_ == "table" and name in _EXCLUDED_TABLES:
         return False
     # 인덱스/제약 등 테이블에 딸린 객체도, 소속 테이블이 제외 대상이면 함께 제외.
     parent = getattr(obj, "table", None)
-    if parent is not None and parent.name in _PIPELINE_OWNED_TABLES:
+    if parent is not None and parent.name in _EXCLUDED_TABLES:
         return False
     return True
 
