@@ -54,9 +54,12 @@ jobs:
         env:
           AGENT_REPO_TOKEN: ${{ secrets.AGENT_REPO_TOKEN }}
         run: |
+          auth_header="$(
+            printf 'x-access-token:%s' "${AGENT_REPO_TOKEN}" | base64 -w 0
+          )"
           git config --global \
-            url."https://x-access-token:${AGENT_REPO_TOKEN}@github.com/".insteadOf \
-            "https://github.com/"
+            http.https://github.com/.extraheader \
+            "AUTHORIZATION: basic ${auth_header}"
 
       - name: Install dependencies
         run: |
@@ -66,11 +69,9 @@ jobs:
       - name: Remove private repository credential
         if: always()
         shell: bash
-        env:
-          AGENT_REPO_TOKEN: ${{ secrets.AGENT_REPO_TOKEN }}
         run: |
           git config --global --unset-all \
-            url."https://x-access-token:${AGENT_REPO_TOKEN}@github.com/".insteadOf \
+            http.https://github.com/.extraheader \
             || true
 
       - name: Compile Python sources
