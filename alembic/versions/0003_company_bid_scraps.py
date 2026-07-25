@@ -30,7 +30,14 @@ def upgrade() -> None:
         sa.Column("company_id", sa.BigInteger(), nullable=False),
         sa.Column("bid_ntce_no", sa.String(length=40), nullable=False),
         sa.Column("bid_ntce_ord", sa.String(length=10), nullable=False),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        # KST naive로 저장한다 — RDS 기본 타임존은 UTC라 now()만 쓰면 9시간 어긋난다.
+        # 이 프로젝트의 다른 일시 컬럼(match_results.computed_at 등)이 KST naive라 맞춘다.
+        sa.Column(
+            "created_at",
+            sa.DateTime(),
+            server_default=sa.text("(now() AT TIME ZONE 'Asia/Seoul')"),
+            nullable=False,
+        ),
         # 회사 삭제(30일 후 파기 배치)면 그 회사의 스크랩도 함께 정리된다.
         sa.ForeignKeyConstraint(["company_id"], ["companies.id"], ondelete="CASCADE"),
         # 공고 PK를 참조. 존재하지 않는 공고는 담을 수 없다.
