@@ -7,7 +7,12 @@
 from datetime import datetime, timedelta, timezone
 
 from app.api.v1.schemas.bid import BidListItem
-from app.api.v1.schemas.match import MatchInfo, MatchListItem, MatchListResponse
+from app.api.v1.schemas.match import (
+    MatchInfo,
+    MatchListItem,
+    MatchListResponse,
+    MatchSummaryResponse,
+)
 from app.domain.enums import SearchSortKey
 from app.infra.db.repositories.match_repository import MatchRepository
 
@@ -20,10 +25,17 @@ class MatchService:
         self._repo = repository
 
     def list_matches(
-        self, *, company_id: int, sort: SearchSortKey, page: int
+        self,
+        *,
+        company_id: int,
+        sort: SearchSortKey,
+        page: int,
+        include_infeasible: bool = False,
     ) -> MatchListResponse:
         now_kst = datetime.now(_KST).replace(tzinfo=None)
-        total = self._repo.count(company_id, clse_after=now_kst)
+        total = self._repo.count(
+            company_id, clse_after=now_kst, include_infeasible=include_infeasible
+        )
         offset = (page - 1) * PAGE_SIZE
         rows = self._repo.list_page(
             company_id,
@@ -31,6 +43,7 @@ class MatchService:
             limit=PAGE_SIZE,
             offset=offset,
             clse_after=now_kst,
+            include_infeasible=include_infeasible,
         )
         # 범위 밖 page는 rows=[]가 자연스럽게 나온다(200 + 빈 배열).
         items = [
@@ -42,4 +55,11 @@ class MatchService:
         ]
         return MatchListResponse(
             total=total, page=page, page_size=PAGE_SIZE, items=items
+        )
+
+    def summary(self, *, company_id: int) -> MatchSummaryResponse:
+        """홈 대시보드 건수. 목록 없이 카운트만 센다."""
+        now_kst = datetime.now(_KST).replace(tzinfo=None)
+        return MatchSummaryResponse(
+            total=self._repo.count(company_id, clse_after=now_kst)
         )

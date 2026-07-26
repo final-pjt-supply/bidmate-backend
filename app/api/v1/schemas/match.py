@@ -29,6 +29,12 @@ class MatchListItem(BaseModel):
     match: MatchInfo
 
 
+class MatchSummaryResponse(BaseModel):
+    """홈 대시보드용 건수 요약. 목록을 받아 total만 쓰는 낭비를 피하려고 따로 둔다."""
+
+    total: int = Field(description="참가 가능한(불가 제외) 마감 전 매칭 건수")
+
+
 class MatchListResponse(BaseModel):
     total: int = Field(description="필터(merged·마감전) 적용 후 전체 매칭 건수")
     page: int

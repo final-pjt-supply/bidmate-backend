@@ -7,7 +7,7 @@
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import CurrentUser, get_authenticated_user, get_match_service
-from app.api.v1.schemas.match import MatchListResponse
+from app.api.v1.schemas.match import MatchListResponse, MatchSummaryResponse
 from app.domain.enums import SearchSortKey
 from app.services.match_service import MatchService
 
@@ -20,10 +20,32 @@ def list_matches(
         default=SearchSortKey.DEADLINE, description="deadline(마감임박, 기본)/recent(최신)"
     ),
     page: int = Query(default=1, ge=1, description="1-based. 범위 밖이면 빈 배열."),
+    include_infeasible: bool = Query(
+        default=False, description="참가 불가 공고 포함 여부. 기본은 제외."
+    ),
     service: MatchService = Depends(get_match_service),
     current_user: CurrentUser = Depends(get_authenticated_user),
 ) -> MatchListResponse:
-    """내 공고 매칭 목록 — merged·마감전만, 사전계산 verdict/근거 포함."""
+    """내 공고 매칭 목록 — merged·마감전만, 사전계산 verdict/근거 포함.
+
+    기본적으로 '불가'는 뺀다 — 실측상 판정의 65%가 불가라, 넣으면 추천 목록이
+    참가할 수 없는 공고로 채워진다. 전체가 필요하면 include_infeasible=true.
+    """
     return service.list_matches(
-        company_id=int(current_user.company_id), sort=sort, page=page
+        company_id=int(current_user.company_id),
+        sort=sort,
+        page=page,
+        include_infeasible=include_infeasible,
     )
+
+
+@router.get("/summary", response_model=MatchSummaryResponse)
+def match_summary(
+    service: MatchService = Depends(get_match_service),
+    current_user: CurrentUser = Depends(get_authenticated_user),
+) -> MatchSummaryResponse:
+    """홈 대시보드 건수 — 목록 없이 카운트만.
+
+    홈은 total·urgent만 쓰는데 목록을 부르면 공고 20건을 받아 버리게 된다.
+    """
+    return service.summary(company_id=int(current_user.company_id))
