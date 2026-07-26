@@ -46,6 +46,19 @@ class MatchRepository:
             )
         return stmt
 
+    def get_one(
+        self, company_id: int, bid_ntce_no: str, bid_ntce_ord: str
+    ) -> MatchResult | None:
+        """공고 상세용 단건 조회. PK 조회라 merged·마감 필터가 필요 없다
+        (그 판단은 이미 상세 화면에 도달했다는 것 자체가 의미한다 — BidService가
+        get_by_bid_id에서 merged를 이미 검증한다)."""
+        stmt = select(MatchResult).where(
+            MatchResult.company_id == company_id,
+            MatchResult.bid_ntce_no == bid_ntce_no,
+            MatchResult.bid_ntce_ord == bid_ntce_ord,
+        )
+        return self._session.execute(stmt).scalar_one_or_none()
+
     def count(
         self, company_id: int, *, clse_after: datetime, include_infeasible: bool = False
     ) -> int:
