@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import get_authenticated_user, get_match_service
 from app.main import app
-from app.services.match_service import MatchService, PAGE_SIZE
+from app.services.match_service import MatchService, PAGE_SIZE, URGENT_DAYS
 
 COMPANY_WITH_DATA = 9001
 
@@ -55,6 +55,12 @@ class FakeMatchRepo:
     def count(self, company_id: int, *, clse_after, include_infeasible=False) -> int:
         self.last_include = include_infeasible
         return len(self._visible(company_id, include_infeasible))
+
+    def count_urgent(self, company_id: int, *, clse_after, clse_before,
+                     include_infeasible=False) -> int:
+        rows = self._visible(company_id, include_infeasible)
+        return sum(1 for m, b in rows
+                   if b.bid_clse_dt is not None and b.bid_clse_dt <= clse_before)
 
     def list_page(self, company_id: int, *, sort, limit, offset, clse_after,
                   include_infeasible=False):
@@ -154,3 +160,29 @@ def test_total_matches_filtered_list(match_client):
     make, _ = match_client
     body = make().get("/me/matches").json()
     assert body["total"] == len(body["items"])
+
+
+# ── 홈 대시보드 요약 ─────────────────────────────────────────────────
+def test_summary_contract(match_client):
+    make, _ = match_client
+    r = make().get("/me/matches/summary")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {"total", "urgent", "urgent_days"}
+    assert body["total"] == 1                 # '불가' 제외
+    assert body["urgent_days"] == URGENT_DAYS  # 프론트 D-day 기준과 동일
+
+
+def test_summary_urgent_within_window(match_client):
+    """마감이 임박 기준 밖이면 urgent에 안 잡힌다(샘플 마감일은 2026-08-01)."""
+    make, _ = match_client
+    body = make().get("/me/matches/summary").json()
+    assert body["urgent"] == 0
+    assert body["urgent"] <= body["total"]
+
+
+def test_summary_requires_login(match_client):
+    make, _ = match_client
+    make()
+    app.dependency_overrides.pop(get_authenticated_user, None)
+    assert TestClient(app).get("/me/matches/summary").status_code == 401

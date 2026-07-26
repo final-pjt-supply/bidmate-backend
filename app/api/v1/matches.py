@@ -7,7 +7,7 @@
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import CurrentUser, get_authenticated_user, get_match_service
-from app.api.v1.schemas.match import MatchListResponse
+from app.api.v1.schemas.match import MatchListResponse, MatchSummaryResponse
 from app.domain.enums import SearchSortKey
 from app.services.match_service import MatchService
 
@@ -37,3 +37,15 @@ def list_matches(
         page=page,
         include_infeasible=include_infeasible,
     )
+
+
+@router.get("/summary", response_model=MatchSummaryResponse)
+def match_summary(
+    service: MatchService = Depends(get_match_service),
+    current_user: CurrentUser = Depends(get_authenticated_user),
+) -> MatchSummaryResponse:
+    """홈 대시보드 건수 — 목록 없이 카운트만.
+
+    홈은 total·urgent만 쓰는데 목록을 부르면 공고 20건을 받아 버리게 된다.
+    """
+    return service.summary(company_id=int(current_user.company_id))

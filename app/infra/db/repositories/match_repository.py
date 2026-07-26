@@ -53,6 +53,25 @@ class MatchRepository:
         stmt = self._apply_filters(stmt, company_id, clse_after, include_infeasible)
         return self._session.execute(stmt).scalar_one()
 
+    def count_urgent(
+        self,
+        company_id: int,
+        *,
+        clse_after: datetime,
+        clse_before: datetime,
+        include_infeasible: bool = False,
+    ) -> int:
+        """마감 임박 건수. 마감일이 [지금, 지금+N일] 안에 든 것만 센다.
+
+        마감일 NULL(상시)은 임박이 아니므로 여기서는 뺀다 — 목록 조회와 달리
+        '언제까지 넣어야 하는가'가 핵심이라 기한 없는 건은 셀 이유가 없다.
+        """
+        stmt = select(func.count()).select_from(MatchResult).join(Bid, _JOIN_ON)
+        stmt = self._apply_filters(stmt, company_id, clse_after, include_infeasible)
+        return self._session.execute(
+            stmt.where(Bid.bid_clse_dt.is_not(None), Bid.bid_clse_dt <= clse_before)
+        ).scalar_one()
+
     def list_page(
         self,
         company_id: int,

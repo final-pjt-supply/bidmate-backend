@@ -7,11 +7,19 @@
 from datetime import datetime, timedelta, timezone
 
 from app.api.v1.schemas.bid import BidListItem
-from app.api.v1.schemas.match import MatchInfo, MatchListItem, MatchListResponse
+from app.api.v1.schemas.match import (
+    MatchInfo,
+    MatchListItem,
+    MatchListResponse,
+    MatchSummaryResponse,
+)
 from app.domain.enums import SearchSortKey
 from app.infra.db.repositories.match_repository import MatchRepository
 
 PAGE_SIZE = 20   # /bids 목록과 동일 계약
+# 마감 임박 기준 — 프론트 computeDday의 urgent(D-3 이하)와 맞춘다.
+# 어긋나면 홈 건수와 카드 배지가 다른 말을 하게 된다.
+URGENT_DAYS = 3
 _KST = timezone(timedelta(hours=9))   # DB는 KST naive
 
 
@@ -50,4 +58,17 @@ class MatchService:
         ]
         return MatchListResponse(
             total=total, page=page, page_size=PAGE_SIZE, items=items
+        )
+
+    def summary(self, *, company_id: int) -> MatchSummaryResponse:
+        """홈 대시보드 건수. 목록 없이 카운트만 두 번 센다."""
+        now_kst = datetime.now(_KST).replace(tzinfo=None)
+        return MatchSummaryResponse(
+            total=self._repo.count(company_id, clse_after=now_kst),
+            urgent=self._repo.count_urgent(
+                company_id,
+                clse_after=now_kst,
+                clse_before=now_kst + timedelta(days=URGENT_DAYS),
+            ),
+            urgent_days=URGENT_DAYS,
         )
