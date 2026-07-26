@@ -9,7 +9,7 @@ MERGE_DB_* 와는 이름을 분리한다 — 같은 RDS를 가리키더라도 AP
 from functools import lru_cache
 from urllib.parse import quote_plus
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -63,6 +63,31 @@ class Settings(BaseSettings):
     # ⚠ 운영에는 절대 true로 두지 말 것(인증이 통째로 무력화된다).
     auth_disabled: bool = Field(default=False)
     dev_company_id: str = Field(default="")
+
+    # --- 개인화 추천(제목 임베딩) ---
+    # 제목 벡터는 입찰 ETL이 bid_chunks 인덱스에 type=title로 적재한다. API는 새 벡터를
+    # 저장하지 않고 회사 관심 쿼리만 임베딩한 뒤, 자격 후보 bid_id를 knn filter로 건다.
+    opensearch_url: str = Field(
+        default="https://localhost:9243",
+        validation_alias=AliasChoices(
+            "OPENSEARCH_URL",
+            "OPENSEARCH_LOCAL_URL",
+            "OPENSEARCH_ENDPOINT",
+        ),
+    )
+    opensearch_user: str = Field(default="")
+    opensearch_password: str = Field(default="")
+    opensearch_index_name: str = Field(
+        default="bid_chunks",
+        validation_alias=AliasChoices(
+            "OPENSEARCH_INDEX_NAME",
+            "OPENSEARCH_INDEX",
+        ),
+    )
+    opensearch_verify_certs: bool = Field(default=True)
+    cf_account_id: str = Field(default="")
+    cf_api_token: str = Field(default="")
+    cf_embedding_model: str = Field(default="@cf/baai/bge-m3")
 
     @property
     def cognito_issuer(self) -> str:

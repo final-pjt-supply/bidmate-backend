@@ -30,6 +30,38 @@ deploy/       개발용 EC2 배포 산출물
 
 ## 실행 (서버)
 
+### 로컬 개발 서버
+
+PowerShell 기준:
+
+```powershell
+# 최초 1회: 가상환경과 의존성 준비
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r app\requirements.txt
+
+# .env에 로컬 또는 SSH 터널 접속 정보를 입력한 뒤 실행
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+- 상태 확인: [http://localhost:8000/health](http://localhost:8000/health)
+- Swagger: [http://localhost:8000/docs](http://localhost:8000/docs)
+- 프론트는 기본적으로 `http://localhost:8000`을 바라보게 설정한다.
+- 인증 없이 고정 회사로 확인하려면 로컬 `.env`에 `AUTH_DISABLED=true`와
+  `DEV_COMPANY_ID=<회사 ID>`를 넣는다. 운영 환경에서는 절대 활성화하지 않는다.
+- RDS와 OpenSearch가 VPC 내부에 있으면 각각 SSH 터널을 먼저 열어야 한다. 접속 정보와
+  비밀값은 `.env`에만 두고 README나 Git에 넣지 않는다.
+
+테스트:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+프론트도 함께 실행할 때는 별도 터미널에서 `bidmate-frontend` 개발 서버를 3000번
+포트로 실행한다.
+
+### EC2 개발 서버
+
 RDS에 접근 가능한 EC2(RDS와 같은 VPC)에서 **systemd 상시 실행**. EC2 스펙·보안그룹·코드
 업로드 등 전체 절차는 [deploy/README.md](deploy/README.md) 참조.
 
@@ -119,4 +151,3 @@ alembic revision --autogenerate -m "설명"   # 신규 마이그레이션(외부
 - 회사 데이터는 `company_id`로 격리(멀티테넌시). 공고 원본은 공용.
 - 대화 에이전트는 `bidmate-agents`를 같은 프로세스에 임베드(ADR 0005). Bedrock·OpenSearch·
   Cloudflare 접속 설정은 `.env`로 주입한다.
-```
