@@ -21,7 +21,8 @@ class EventService:
     def record(self, payload: EventIn, *, company_id: int | None = None) -> None:
         """이벤트 한 건 적재.
 
-        company_id는 서버(인증)가 정한다 — 현재 인증 스텁이라 None(로그인 전 이벤트).
+        company_id는 서버(인증)가 정한다 — 라우터가 get_current_user(선택적 인증)로
+        미리 정해 넘긴다. None이면 비로그인 이벤트.
         event_type은 클라 입력이 아니라 event_name에서 파생한다(drift 방지).
         created_at은 서버 수신 시각(KST naive) — 클라 시계를 믿지 않는다.
         """

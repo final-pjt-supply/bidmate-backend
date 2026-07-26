@@ -2,12 +2,15 @@
 """POST /events 계약 테스트.
 
 저장(S3) 없이 in-memory sink 대역으로 정책/검증을 고정한다: enum 검증, event_type
-서버 파생, company_id 미수신(신원은 서버가 정함), created_at 서버 각인, extra 필드 거부.
+서버 파생, company_id는 토큰에서 서버가 정함(클라 미수신), created_at 서버 각인,
+extra 필드 거부.
 """
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_event_service
+from app.api.deps import get_current_user, get_event_service
 from app.main import app
 from app.services.event_service import EventService
 
@@ -51,7 +54,7 @@ def test_collect_event_202_and_derives_type(client_and_sink):
     ev = sink.saved[0]
     assert ev["event_name"] == "bid_card_clicked"
     assert ev["event_type"] == "click"          # 서버가 event_name에서 파생
-    assert ev["company_id"] is None             # 인증 스텁 → null(클라가 못 보냄)
+    assert ev["company_id"] is None             # 비로그인 → null(클라가 못 보냄)
     assert ev["anonymous_id"] == "anon-123"
     assert ev["properties"] == {"position": 3, "sort": "deadline"}
     # created_at은 서버가 각인한 KST naive ISO 문자열(S3 JSON 저장 형태).
@@ -104,3 +107,23 @@ def test_malformed_visit_id_is_422(client_and_sink):
     client, _ = client_and_sink
     res = client.post("/events", json=_payload(visit_id="not-a-uuid"))
     assert res.status_code == 422
+
+
+# ── company_id 귀속 (이슈 #61) ──────────────────────────────────────────
+# 이전엔 라우터가 인증을 아예 안 받아 로그인 상태에서도 company_id가 항상 null로
+# 적재됐다. login_completed·profile_updated 같은 로그인 전용 이벤트조차 회사를
+# 특정 못 해, 회사별 행동 집계가 불가능했다.
+def test_logged_in_event_gets_company_id(client_and_sink):
+    client, sink = client_and_sink
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        company_id="1", email=None
+    )
+    client.post("/events", json=_payload(event_name="bid_bookmarked", properties={"on": True}))
+    assert sink.saved[0]["company_id"] == 1   # 문자열 토큰값 → int로 저장
+
+
+def test_anonymous_event_company_id_stays_null(client_and_sink):
+    """로그인 안 한 상태에서도 이벤트는 계속 받아야 한다(home_viewed 등)."""
+    client, sink = client_and_sink
+    client.post("/events", json=_payload(event_name="home_viewed"))
+    assert sink.saved[0]["company_id"] is None
