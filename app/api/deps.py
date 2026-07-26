@@ -23,14 +23,19 @@ from app.infra.db.repositories.company_profile_repository import (
 from app.infra.db.repositories.company_repository import CompanyRepository
 from app.infra.db.repositories.master_repository import MasterRepository
 from app.infra.db.repositories.match_repository import MatchRepository
+from app.infra.db.repositories.recommendation_repository import (
+    RecommendationRepository,
+)
 from app.infra.db.repositories.scrap_repository import ScrapRepository
 from app.infra.db.session import get_session
+from app.infra.search.recommendation_search import RecommendationSearch
 from app.infra.s3.event_sink import get_event_sink
 from app.services.bid_service import BidService
 from app.services.company_profile_service import CompanyProfileService
 from app.services.event_service import EventService
 from app.services.master_service import MasterService
 from app.services.match_service import MatchService
+from app.services.recommendation_service import RecommendationService
 from app.services.scrap_service import ScrapService
 
 
@@ -143,6 +148,23 @@ def get_company_profile_service(
 
 def get_match_service(db: Session = Depends(get_db)) -> MatchService:
     return MatchService(MatchRepository(db))
+
+
+def get_recommendation_service(
+    db: Session = Depends(get_db),
+) -> RecommendationService:
+    settings = get_settings()
+    search = RecommendationSearch(
+        opensearch_url=settings.opensearch_url,
+        opensearch_user=settings.opensearch_user,
+        opensearch_password=settings.opensearch_password,
+        index_name=settings.opensearch_index_name,
+        verify_certs=settings.opensearch_verify_certs,
+        cf_account_id=settings.cf_account_id,
+        cf_api_token=settings.cf_api_token,
+        cf_model=settings.cf_embedding_model,
+    )
+    return RecommendationService(RecommendationRepository(db), search)
 
 
 def get_master_service(db: Session = Depends(get_db)) -> MasterService:
