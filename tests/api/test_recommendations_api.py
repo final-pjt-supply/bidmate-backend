@@ -110,6 +110,25 @@ def test_search_cannot_reintroduce_ineligible_bid(recommendation_client):
     assert "rogue_bid" not in ids
 
 
+def test_duplicate_titles_are_collapsed():
+    duplicate = _bid("bid_c")
+    duplicate.bid_ntce_nm = "bid_b 제목"
+    repo = FakeRecommendationRepo(
+        rows=[(_match(), _bid("bid_a")), (_match(), _bid("bid_b")), (_match(), duplicate)]
+    )
+
+    class DuplicateSearch(FakeRecommendationSearch):
+        def search_titles(self, vector, *, candidate_ids, limit):
+            return [
+                TitleSearchHit("bid_c", 0.91),
+                TitleSearchHit("bid_b", 0.90),
+                TitleSearchHit("bid_a", 0.80),
+            ]
+
+    result = RecommendationService(repo, DuplicateSearch()).recommend(company_id=1, limit=3)
+    assert [item.bid.bid_id for item in result.items] == ["bid_c", "bid_a"]
+
+
 def test_no_interest_signal_returns_empty_without_search():
     repo = FakeRecommendationRepo(queries=[], source=None)
 

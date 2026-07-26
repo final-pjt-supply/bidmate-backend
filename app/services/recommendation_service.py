@@ -57,10 +57,18 @@ class RecommendationService:
                 if previous is None or hit.score > previous[0]:
                     best[hit.bid_id] = (hit.score, query)
 
-        ranked = sorted(best.items(), key=lambda item: (-item[1][0], item[0]))[:limit]
+        ranked = sorted(best.items(), key=lambda item: (-item[1][0], item[0]))
         items = []
+        seen_titles: set[str] = set()
         for bid_id, (score, matched_text) in ranked:
             match, bid = candidates[bid_id]
+            # 나라장터 정정 차수 때문에 bid_id는 달라도 제목이 같은 카드가 여러 장 생길
+            # 수 있다. 추천 화면에서는 가장 높은 점수 한 장만 보여준다.
+            title_key = (bid.bid_ntce_nm or "").strip().casefold()
+            if title_key and title_key in seen_titles:
+                continue
+            if title_key:
+                seen_titles.add(title_key)
             bid_item = BidListItem.model_validate(bid)
             bid_item.match_score = score
             items.append(
@@ -75,6 +83,8 @@ class RecommendationService:
                     ),
                 )
             )
+            if len(items) >= limit:
+                break
         return RecommendationListResponse(
             total=len(items),
             candidate_count=len(candidates),
