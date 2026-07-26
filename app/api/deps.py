@@ -29,6 +29,7 @@ from app.infra.s3.event_sink import get_event_sink
 from app.services.bid_service import BidService
 from app.services.company_profile_service import CompanyProfileService
 from app.services.event_service import EventService
+from app.services.master_service import MasterService
 from app.services.match_service import MatchService
 from app.services.scrap_service import ScrapService
 
@@ -141,6 +142,10 @@ def get_company_profile_service(
 
 def get_match_service(db: Session = Depends(get_db)) -> MatchService:
     return MatchService(MatchRepository(db))
+
+
+def get_master_service(db: Session = Depends(get_db)) -> MasterService:
+    return MasterService(MasterRepository(db))
 
 
 def get_event_service() -> EventService:

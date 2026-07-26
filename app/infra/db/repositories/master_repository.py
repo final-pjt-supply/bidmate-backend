@@ -6,7 +6,7 @@
 """
 from collections.abc import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.infra.db.models.master import (
@@ -47,3 +47,31 @@ class MasterRepository:
 
     def cert_names(self, codes: Iterable[str]) -> dict[str, str | None]:
         return self._lookup(CertMaster.cert_code, CertMaster.cert_name, codes)
+
+    def search_items(self, q: str, *, limit: int) -> list[tuple[str, str | None]]:
+        """품목 자동완성 — 품명 부분일치(대소문자 무시).
+
+        10자리(세부품명)만 돌려준다. 8자리는 상위 분류라, 회사가 그걸로 등록하면
+        10자리를 요구하는 공고와 코드가 어긋난다(ItemCodeMaster 주석 참조).
+
+        q가 비면 빈 목록 — 35,171행을 통째로 흘리지 않는다. 정렬은 짧은 이름 우선
+        ("노트북컴퓨터"가 "융복합노트북컴퓨터"보다 먼저)이고, 동률은 코드로 안정화한다.
+        """
+        term = q.strip()
+        if not term:
+            return []
+        pattern = f"%{term}%"
+        stmt = (
+            select(ItemCodeMaster.item_code, ItemCodeMaster.item_name)
+            .where(
+                func.length(ItemCodeMaster.item_code) == 10,
+                ItemCodeMaster.is_active.is_(True),
+                ItemCodeMaster.item_name.ilike(pattern),
+            )
+            .order_by(
+                func.length(ItemCodeMaster.item_name),
+                ItemCodeMaster.item_code,
+            )
+            .limit(limit)
+        )
+        return [(c, n) for c, n in self._session.execute(stmt).all()]
