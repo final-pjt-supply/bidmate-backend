@@ -3,12 +3,14 @@
 (명세가 바뀌어도 파이프라인이 흔들리지 않게 분리).
 
 원본값만 내린다 — D-day 계산·코드 한글변환·금액 포맷은 프론트 담당. 필드명은
-snake_case(DB와 동일). match_score/match는 에이전트 완성 전까지 항상 null.
+snake_case(DB와 동일). match_score는 여전히 항상 null(매칭이 점수가 아니라
+verdict/axes 구조로 확정됨, #57). match는 상세에서 서비스가 match_results로 채운다.
 """
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api.v1.schemas.match_info import MatchInfo
 from app.domain.enums import BidCategory
 from app.domain.qualification import Qualification
 
@@ -59,4 +61,5 @@ class BidDetail(BaseModel):
     # 서비스가 플랫 행에서 조립해 채운다. from_attributes로 model_validate(row) 할 때
     # ORM 행엔 'qualification' 속성이 없어 빈 기본값이 들어가고, 직후 서비스가 덮어쓴다.
     qualification: Qualification = Field(default_factory=Qualification)
-    match: None = None   # 에이전트 완성 후 다른 팀원이 채움
+    # 비로그인이거나 아직 계산된 매칭이 없으면(프로필 미입력 등) null.
+    match: MatchInfo | None = None

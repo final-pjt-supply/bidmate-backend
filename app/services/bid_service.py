@@ -5,10 +5,12 @@
 from datetime import datetime, timedelta, timezone
 
 from app.api.v1.schemas.bid import BidDetail, BidListItem, BidListResponse
+from app.api.v1.schemas.match_info import MatchInfo
 from app.domain.enums import BidCategory, BidSortKey, SearchSortKey
 from app.domain.qualification import Qualification
 from app.infra.db.models.bid import Bid
 from app.infra.db.repositories.bid_repository import BidRepository
+from app.infra.db.repositories.match_repository import MatchRepository
 
 PAGE_SIZE = 20   # 명세상 고정 — 홈·추천이 쓰는 GET /bids. 응답 계약(확정본) 값이라 바꾸지 않는다.
 # 검색 화면 전용. 프론트 목록이 3열 그리드라 20이면 마지막 줄에 2개만 남는다.
@@ -24,8 +26,10 @@ class BidNotFoundError(Exception):
 
 
 class BidService:
-    def __init__(self, repository: BidRepository):
+    def __init__(self, repository: BidRepository, match_repository: MatchRepository | None = None):
         self._repo = repository
+        # 선택 주입 — 상세(get_bid)에서만 쓰고 목록 경로들은 이 리포지토리가 필요 없다.
+        self._match_repo = match_repository
 
     def list_bids(
         self,
@@ -121,6 +125,15 @@ class BidService:
         detail = BidDetail.model_validate(row)
         # 플랫 컬럼 → 중첩 qualification 조립(DB엔 별도 테이블/JSONB단일컬럼으로 없음).
         detail.qualification = Qualification.model_validate(row)
+        # 비로그인이거나 아직 매칭이 계산되지 않았으면(프로필 미입력 등) null 그대로.
+        # bid_id를 파싱해 ntce_no/ord를 뽑지 않는다(모델 주석: split 금지, 불투명 식별자) —
+        # 이미 조회한 row에서 구조화된 필드를 그대로 쓴다.
+        if self._match_repo is not None and company_id is not None:
+            match_row = self._match_repo.get_one(
+                int(company_id), row.bid_ntce_no, row.bid_ntce_ord
+            )
+            if match_row is not None:
+                detail.match = MatchInfo.model_validate(match_row)
         return detail
 
     @staticmethod

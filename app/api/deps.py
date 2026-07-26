@@ -126,7 +126,8 @@ def _verify_or_401(token: str):
 
 
 def get_bid_service(db: Session = Depends(get_db)) -> BidService:
-    return BidService(BidRepository(db))
+    # 상세(get_bid)에서 매칭 판정을 붙이려면 MatchRepository도 필요하다.
+    return BidService(BidRepository(db), MatchRepository(db))
 
 
 def get_scrap_service(db: Session = Depends(get_db)) -> ScrapService:
