@@ -20,10 +20,17 @@ class MatchService:
         self._repo = repository
 
     def list_matches(
-        self, *, company_id: int, sort: SearchSortKey, page: int
+        self,
+        *,
+        company_id: int,
+        sort: SearchSortKey,
+        page: int,
+        include_infeasible: bool = False,
     ) -> MatchListResponse:
         now_kst = datetime.now(_KST).replace(tzinfo=None)
-        total = self._repo.count(company_id, clse_after=now_kst)
+        total = self._repo.count(
+            company_id, clse_after=now_kst, include_infeasible=include_infeasible
+        )
         offset = (page - 1) * PAGE_SIZE
         rows = self._repo.list_page(
             company_id,
@@ -31,6 +38,7 @@ class MatchService:
             limit=PAGE_SIZE,
             offset=offset,
             clse_after=now_kst,
+            include_infeasible=include_infeasible,
         )
         # 범위 밖 page는 rows=[]가 자연스럽게 나온다(200 + 빈 배열).
         items = [
