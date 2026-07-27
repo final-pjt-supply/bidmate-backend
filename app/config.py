@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     db_pool_size: int = Field(default=1)
     db_max_overflow: int = Field(default=2)
 
+    # 배포 식별자. Docker 이미지는 Git commit SHA를 APP_VERSION으로 주입하고,
+    # Blue/Green 슬롯은 DEPLOYMENT_SLOT으로 주입한다. 로컬은 dev/local.
+    app_version: str = Field(default="dev")
+    deployment_slot: str = Field(default="local")
+
     # CORS 허용 오리진. 브라우저(프론트)가 다른 오리진에서 API를 부르면 이 목록에
     # 없는 한 브라우저가 차단한다. 콤마 구분 문자열로 두는 이유: list 타입은
     # pydantic-settings가 env 값을 JSON으로 파싱하려 해 "a,b" 같은 평범한 입력이

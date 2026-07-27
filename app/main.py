@@ -7,12 +7,14 @@
 """
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
+from sqlalchemy import text
 
 from app.api.v1.router import api_router
 from app.config import get_settings
+from app.infra.db.session import engine
 
 _settings = get_settings()
 
@@ -52,7 +54,31 @@ app.include_router(api_router)
 
 @app.get("/health", tags=["meta"])
 def health() -> dict:
+    """프로세스 생존 확인. 외부 의존성을 조회하지 않는 liveness probe."""
     return {"status": "ok"}
+
+
+@app.get("/ready", tags=["meta"])
+def ready() -> dict:
+    """요청 처리 준비 확인. 운영 DB에 읽기 전용 SELECT 1을 수행한다."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        # 접속정보나 내부 예외는 응답에 노출하지 않는다.
+        raise HTTPException(
+            status_code=503, detail="데이터베이스 연결을 확인할 수 없습니다"
+        ) from exc
+    return {"status": "ready", "database": "ok"}
+
+
+@app.get("/version", tags=["meta"])
+def version() -> dict:
+    """현재 트래픽을 처리하는 이미지 버전과 Blue/Green 슬롯."""
+    return {
+        "version": _settings.app_version,
+        "slot": _settings.deployment_slot,
+    }
 
 
 # AWS Lambda 핸들러(template.yaml에서 참조).

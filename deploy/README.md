@@ -1,4 +1,7 @@
-# BidMate API — 개발용 EC2 배포
+# BidMate API — 기존 systemd 배포
+
+> 이 문서는 최초 EC2 구성과 비상 롤백용 기존 방식이다. 신규 배포는
+> [Nginx Blue/Green CI/CD](CD.md)를 사용한다.
 
 프라이빗 RDS(`bidmate-postgres`)에 접근 가능한 EC2(같은 VPC)에 조회 API 2개를
 uvicorn/systemd로 상시 띄우는 절차. **개발용**(무인증, SG로 접근 제한).

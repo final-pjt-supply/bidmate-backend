@@ -10,7 +10,7 @@
 
 FastAPI · Pydantic v2 · SQLAlchemy 2 · Alembic · PostgreSQL(주) · Cognito JWT(인증)
 · AWS Bedrock(대화 에이전트) · OpenSearch(에이전트 검색) · S3(이벤트 적재)
-· Mangum + Lambda(배포 목표) · pytest · Docker
+· Uvicorn · Nginx · Docker · ECR · SSM · pytest
 
 ## 구조 (모듈러 모놀리스, 의존성 단방향)
 
@@ -25,7 +25,7 @@ app/
   main.py     앱 진입점 + Lambda 핸들러
 tests/api/    계약 테스트 + repository 통합 테스트
 alembic/      마이그레이션 (API 소유 테이블만 관리, coexist)
-deploy/       개발용 EC2 배포 산출물
+deploy/       EC2 Blue/Green 배포·Nginx·AWS 정책
 ```
 
 ## 실행 (서버)
@@ -60,23 +60,24 @@ py -3.11 -m venv .venv
 프론트도 함께 실행할 때는 별도 터미널에서 `bidmate-frontend` 개발 서버를 3000번
 포트로 실행한다.
 
-### EC2 개발 서버
+### EC2 서버
 
-RDS에 접근 가능한 EC2(RDS와 같은 VPC)에서 **systemd 상시 실행**. EC2 스펙·보안그룹·코드
-업로드 등 전체 절차는 [deploy/README.md](deploy/README.md) 참조.
+RDS에 접근 가능한 프라이빗 EC2에서 Nginx가 8000 포트를 받고 Blue(8001)·
+Green(8002) Docker 컨테이너로 전달한다. 전체 CI/CD 절차는
+[deploy/CD.md](deploy/CD.md) 참조.
 
 ```bash
-# EC2에서 (코드 업로드 후)
-cp deploy/env.ec2.example .env    # RDS 직접접속 정보 채우기 (SSH 터널 아님)
-bash deploy/setup.sh              # venv + 의존성 + systemd 등록 + 헬스체크 원샷
+# EC2 최초 1회
+sudo bash deploy/bootstrap-blue-green.sh
 ```
 
-서비스 관리:
+상태 확인:
 
 ```bash
-sudo systemctl restart bidmate-api      # 코드 갱신 후 재배포
-journalctl -u bidmate-api -f            # 로그
-curl http://localhost:8000/health       # 상태 확인
+curl http://localhost:8000/health
+curl http://localhost:8000/ready
+curl http://localhost:8000/version
+sudo docker ps --filter label=com.bidmate.service=api
 ```
 
 수동 실행이 필요하면: `uvicorn app.main:app --host 0.0.0.0 --port 8000`
@@ -134,8 +135,9 @@ alembic revision --autogenerate -m "설명"   # 신규 마이그레이션(외부
 
 ## 배포
 
-개발용 EC2(uvicorn/systemd) 절차는 [deploy/README.md](deploy/README.md) 참조. 정식 배포
-(Lambda + API Gateway 또는 컨테이너 CI/CD)는 이후 단계.
+PR은 GitHub Actions가 Python 테스트와 ARM64 이미지를 검증한다. `main` CI가 성공하면
+OIDC로 ECR에 SHA 이미지를 저장하고 SSM으로 프라이빗 EC2의 비활성 슬롯에 배포한다.
+Nginx 전환·스모크 테스트·자동 롤백은 [deploy/CD.md](deploy/CD.md) 참조.
 
 ## 규칙
 
