@@ -190,9 +190,9 @@ trap rollback ERR
 
 wait_for_endpoint() {
   local url="$1"
-  local attempt
+  local _
 
-  for attempt in $(seq 1 30); do
+  for _ in $(seq 1 30); do
     if curl --fail --silent --show-error --max-time 4 "${url}" >/dev/null; then
       return 0
     fi
