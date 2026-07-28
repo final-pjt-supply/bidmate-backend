@@ -23,6 +23,7 @@ from app.infra.db.session import Base
 #   (실제로 scrap이 빠져 company_bid_scraps가 관리 밖에 있었다.) 모델을 추가하면
 #   반드시 여기도 함께 등록할 것.
 import app.infra.db.models.bid  # noqa: F401
+import app.infra.db.models.chat  # noqa: F401
 import app.infra.db.models.company  # noqa: F401
 import app.infra.db.models.company_profile  # noqa: F401
 import app.infra.db.models.master  # noqa: F401
