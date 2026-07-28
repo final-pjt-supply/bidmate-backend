@@ -15,9 +15,8 @@ from pydantic import BaseModel, Field
 class AgentChatRequest(BaseModel):
     # 길이 제한은 비용 방어를 겸한다 — 빈/초장문 질의가 LLM(Bedrock)까지 가지 않게.
     query: str = Field(min_length=1, max_length=500)
-    # 인증(Cognito JWT) 미구현 동안 프론트가 직접 보낸다. 인증이 붙으면
-    # CurrentUser.company_id로 옮기고 이 필드는 제거한다(deps.py ★ 참고).
-    company_id: str
+    # ⚠ company_id는 받지 않는다 — 반드시 인증 토큰(get_authenticated_user)에서
+    # 온다. 클라가 정하면 남의 회사 세션을 열람·하이재킹할 수 있다(멀티테넌시 우회).
     session_id: str | None = None
     entry_bid_id: str | None = None    # 특정 공고 상세 화면에서 진입 시(Case 2)
 

@@ -10,7 +10,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.agents.chat_service import AgentChatService, SessionBusyError
-from app.api.deps import get_agent_chat_service
+from app.api.deps import CurrentUser, get_agent_chat_service, get_authenticated_user
 from app.api.v1.schemas.agent import AgentChatRequest, AgentChatResponse
 from app.infra.db.repositories.chat_repository import SessionForbiddenError
 
@@ -23,11 +23,13 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 def chat(
     payload: AgentChatRequest,
     service: AgentChatService = Depends(get_agent_chat_service),
+    current_user: CurrentUser = Depends(get_authenticated_user),
 ) -> AgentChatResponse:
+    # ★ company_id는 토큰에서만 온다(요청 body 아님) — 멀티테넌시 격리의 신뢰 기준.
     try:
         session_id, resp = service.chat(
             query=payload.query,
-            company_id=payload.company_id,
+            company_id=current_user.company_id,
             entry_bid_id=payload.entry_bid_id,
             session_id=payload.session_id,
         )
