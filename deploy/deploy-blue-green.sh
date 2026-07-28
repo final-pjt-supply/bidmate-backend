@@ -214,6 +214,24 @@ wait_for_endpoint() {
   return 1
 }
 
+# nginx graceful reload keeps old workers accepting new connections during the
+# drain window, so /version can briefly still report the old slot. Poll until
+# the candidate slot answers instead of failing on the first (racy) read.
+wait_for_version() {
+  local expect_slot="$1" expect_version="$2" payload _
+  for _ in $(seq 1 15); do
+    payload="$(curl --fail --silent --max-time 5 \
+      "http://127.0.0.1:8000/version" 2>/dev/null || true)"
+    if [[ "${payload}" == *"\"version\":\"${expect_version}\""* &&
+          "${payload}" == *"\"slot\":\"${expect_slot}\""* ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Nginx did not switch to ${expect_slot}: ${payload}" >&2
+  return 1
+}
+
 echo "Authenticating the EC2 role to ${registry}."
 aws ecr get-login-password --region "${aws_region}" \
   | docker login --username AWS --password-stdin "${registry}" >/dev/null
@@ -277,15 +295,9 @@ switched="true"
 
 wait_for_endpoint "http://127.0.0.1:8000/ready"
 
-version_payload="$(
-  curl --fail --silent --show-error --max-time 5 \
-    "http://127.0.0.1:8000/version"
-)"
-if [[ "${version_payload}" != *"\"version\":\"${version}\""* ||
-      "${version_payload}" != *"\"slot\":\"${candidate_slot}\""* ]]; then
-  echo "Nginx did not switch to ${candidate_slot}: ${version_payload}" >&2
-  false
-fi
+# Drain-tolerant: retry until the candidate slot serves through :8000 (a single
+# check right after reload races the old workers still draining).
+wait_for_version "${candidate_slot}" "${version}"
 
 curl --fail --silent --show-error --max-time 10 \
   "http://127.0.0.1:8000/bids?page=1" >/dev/null
