@@ -1,20 +1,44 @@
 # -*- coding: utf-8 -*-
-"""POST /agent/chat 계약 테스트 — HTTP 매핑과 세션ID 왕복만 본다(왕복 규약
-자체는 test_agent_chat_service.py가, 에이전트 로직은 agents 패키지가 담당)."""
+"""POST /agent/chat 계약 테스트 — HTTP 매핑·세션ID 왕복·상태코드(409/502)만 본다
+(왕복/가드/IDOR 자체는 test_agent_chat_service.py, 에이전트 로직은 agents 패키지)."""
 import pytest
 from fastapi.testclient import TestClient
 
 from agents.schemas import AgentResponse, Citation, Filters, SessionContext
 
+from app.agents import chat_service as cs
 from app.agents.chat_service import AgentChatService
-from app.agents.session_store import InMemorySessionStore
 from app.api.deps import get_agent_chat_service
+from app.infra.db.repositories.chat_repository import SessionForbiddenError
 from app.main import app
 
 
 def make_ctx(summary: str = "턴1") -> SessionContext:
-    return SessionContext(last_bid_ids=["B1"], last_summary=summary,
-                          last_filters=Filters())
+    return SessionContext(last_bid_ids=["B1"], last_summary=summary, last_filters=Filters())
+
+
+class FakeChatRepo:
+    def __init__(self):
+        self.sessions = {}
+        self._seq = 0
+
+    def new_session_id(self):
+        self._seq += 1
+        return f"sid-{self._seq}"
+
+    def open_turn(self, session_id, company_id, user_query):
+        if session_id in self.sessions:
+            owner, ctx = self.sessions[session_id]
+            if owner != company_id:
+                raise SessionForbiddenError(session_id)
+        else:
+            self.sessions[session_id] = (company_id, None)
+            ctx = None
+        return ctx
+
+    def close_turn(self, session_id, resp):
+        owner, _ = self.sessions[session_id]
+        self.sessions[session_id] = (owner, resp.session_context)
 
 
 class FakeRunner:
@@ -29,10 +53,9 @@ class FakeRunner:
 
 @pytest.fixture
 def client_with_runner():
-    """미리 정한 AgentResponse 목록으로 뜬 TestClient 팩토리."""
     def _make(responses) -> tuple[TestClient, FakeRunner]:
         runner = FakeRunner(responses)
-        service = AgentChatService(InMemorySessionStore(), runner)
+        service = AgentChatService(FakeChatRepo(), runner)
         app.dependency_overrides[get_agent_chat_service] = lambda: service
         return TestClient(app), runner
 
@@ -46,11 +69,10 @@ def test_answer_turn_returns_session_id_and_maps_fields(client_with_runner):
         AgentResponse(action="answer", answer="대전 공고 2건입니다.",
                       citations=[citation], session_context=make_ctx())])
     r = client.post("/agent/chat", json={
-        "query": "대전 공고 알려줘", "company_id": "C1",
-        "entry_bid_id": "R26BK_01"})
+        "query": "대전 공고 알려줘", "company_id": "9001", "entry_bid_id": "R26BK_01"})
     assert r.status_code == 200
     body = r.json()
-    assert body["session_id"]                       # 서버가 발급
+    assert body["session_id"]
     assert body["action"] == "answer"
     assert body["answer"] == "대전 공고 2건입니다."
     assert body["citations"][0]["bid_id"] == "B1"
@@ -60,14 +82,12 @@ def test_answer_turn_returns_session_id_and_maps_fields(client_with_runner):
 
 def test_second_turn_reuses_session(client_with_runner):
     client, runner = client_with_runner([
-        AgentResponse(action="answer", answer="답1",
-                      session_context=make_ctx("턴1")),
-        AgentResponse(action="answer", answer="답2",
-                      session_context=make_ctx("턴2"))])
+        AgentResponse(action="answer", answer="답1", session_context=make_ctx("턴1")),
+        AgentResponse(action="answer", answer="답2", session_context=make_ctx("턴2"))])
     sid = client.post("/agent/chat", json={
-        "query": "턴1", "company_id": "C1"}).json()["session_id"]
+        "query": "턴1", "company_id": "9001"}).json()["session_id"]
     r2 = client.post("/agent/chat", json={
-        "query": "턴2", "company_id": "C1", "session_id": sid})
+        "query": "턴2", "company_id": "9001", "session_id": sid})
     assert r2.json()["session_id"] == sid
     assert runner.requests[1].session_context.last_summary == "턴1"
 
@@ -77,7 +97,7 @@ def test_clarify_turn_maps_clarify_message(client_with_runner):
         AgentResponse(action="clarify", clarify_message="지역을 알려주세요.",
                       session_context=make_ctx())])
     body = client.post("/agent/chat", json={
-        "query": "공고 찾아줘", "company_id": "C1"}).json()
+        "query": "공고 찾아줘", "company_id": "9001"}).json()
     assert body["action"] == "clarify"
     assert body["clarify_message"] == "지역을 알려주세요."
     assert body["answer"] is None
@@ -85,44 +105,55 @@ def test_clarify_turn_maps_clarify_message(client_with_runner):
 
 def test_redirect_turn_maps_filters(client_with_runner):
     client, _ = client_with_runner([
-        AgentResponse(action="redirect",
-                      redirect_filters=Filters(region="대전"),
+        AgentResponse(action="redirect", redirect_filters=Filters(region="대전"),
                       session_context=make_ctx())])
     body = client.post("/agent/chat", json={
-        "query": "대전 공고 목록 보여줘", "company_id": "C1"}).json()
+        "query": "대전 공고 목록 보여줘", "company_id": "9001"}).json()
     assert body["action"] == "redirect"
     assert body["redirect_filters"]["region"] == "대전"
 
 
 def test_query_is_required(client_with_runner):
     client, _ = client_with_runner([])
-    r = client.post("/agent/chat", json={"company_id": "C1"})
+    r = client.post("/agent/chat", json={"company_id": "9001"})
     assert r.status_code == 422
 
 
 def test_empty_query_is_422(client_with_runner):
     client, runner = client_with_runner([])
-    r = client.post("/agent/chat", json={"query": "", "company_id": "C1"})
+    r = client.post("/agent/chat", json={"query": "", "company_id": "9001"})
     assert r.status_code == 422
     assert runner.requests == []           # LLM까지 가지 않는다(비용 방어)
 
 
 def test_too_long_query_is_422(client_with_runner):
     client, runner = client_with_runner([])
-    r = client.post("/agent/chat", json={"query": "가" * 501, "company_id": "C1"})
+    r = client.post("/agent/chat", json={"query": "가" * 501, "company_id": "9001"})
     assert r.status_code == 422
     assert runner.requests == []
 
 
 def test_agent_failure_maps_to_502(client_with_runner):
-    """Bedrock 장애 등 에이전트 실패를 맨몸 500 대신 502+메시지로 내린다 —
-    프론트가 '일시 오류, 재시도' UI를 만들 수 있는 규약."""
+    """Bedrock 장애 등 에이전트 실패 → 502+메시지(프론트 '재시도' UI 규약)."""
     def broken_runner(req):
         raise RuntimeError("Bedrock down")
 
     client, _ = client_with_runner([])
-    service = AgentChatService(InMemorySessionStore(), broken_runner)
-    app.dependency_overrides[get_agent_chat_service] = lambda: service
-    r = client.post("/agent/chat", json={"query": "질문", "company_id": "C1"})
+    app.dependency_overrides[get_agent_chat_service] = lambda: AgentChatService(
+        FakeChatRepo(), broken_runner)
+    r = client.post("/agent/chat", json={"query": "질문", "company_id": "9001"})
     assert r.status_code == 502
     assert "다시 시도" in r.json()["detail"]
+
+
+def test_session_busy_maps_to_409(client_with_runner):
+    """응답 생성 중 재입력 → 409(ADR-22)."""
+    client, _ = client_with_runner([
+        AgentResponse(action="answer", answer="x", session_context=make_ctx())])
+    cs._inflight.add("busy-1")
+    try:
+        r = client.post("/agent/chat", json={
+            "query": "q", "company_id": "9001", "session_id": "busy-1"})
+        assert r.status_code == 409
+    finally:
+        cs._inflight.discard("busy-1")

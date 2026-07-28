@@ -9,9 +9,10 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.agents.chat_service import AgentChatService
+from app.agents.chat_service import AgentChatService, SessionBusyError
 from app.api.deps import get_agent_chat_service
 from app.api.v1.schemas.agent import AgentChatRequest, AgentChatResponse
+from app.infra.db.repositories.chat_repository import SessionForbiddenError
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,17 @@ def chat(
             company_id=payload.company_id,
             entry_bid_id=payload.entry_bid_id,
             session_id=payload.session_id,
+        )
+    except SessionBusyError:
+        # 응답 생성 중 재입력 — 세션당 1턴(ADR-22). 프론트는 대기 UI로 막고, 뚫려도 여기서 방어.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이전 응답을 처리 중입니다. 잠시 후 다시 시도해주세요.",
+        )
+    except SessionForbiddenError:
+        # 다른 회사 소유 세션(IDOR) — 존재를 숨겨 404로 통일.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="세션을 찾을 수 없습니다."
         )
     except Exception:
         # Bedrock 장애·스로틀 등 에이전트 실패를 맨몸 500 대신 502로 규약화 —
