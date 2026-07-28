@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
-"""챗봇 대화 조회 유스케이스 — 내 세션 목록/상세(메시지).
+"""챗봇 대화 유스케이스 — 내 세션 목록/상세(메시지)와 삭제.
 
-멀티테넌시: 모든 조회가 company_id로 격리된다(repository가 강제, IDOR 차단).
+멀티테넌시: 모든 접근이 company_id로 격리된다(repository가 강제, IDOR 차단).
 세션이 없거나 남의 것이면 repository가 SessionForbiddenError를 던진다(라우터 404).
+
+삭제는 두 종류다 — 대화방 통째(소프트)와 마지막 턴 취소(하드). 정책·경계는
+repository 쪽에 주석으로 있다. 여기는 조립만 하고 규칙을 중복 구현하지 않는다.
 """
 from app.api.v1.schemas.chat import (
     MessageOut,
@@ -41,3 +44,11 @@ class ChatQueryService:
             created_at=row.created_at, updated_at=row.updated_at,
             messages=[MessageOut.model_validate(m) for m in msgs],
         )
+
+    def delete_session(self, *, session_id: str, company_id: int) -> None:
+        """대화방 삭제(소프트). 없거나 남의 것이면 SessionForbiddenError."""
+        self._repo.soft_delete_session(session_id, company_id)
+
+    def delete_last_turn(self, *, session_id: str, company_id: int) -> int:
+        """마지막 턴 취소. 반환 0이면 지울 메시지가 없었다(라우터가 404)."""
+        return self._repo.delete_last_turn(session_id, company_id)
