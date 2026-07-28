@@ -10,7 +10,11 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_authenticated_user, get_company_profile_service
+from app.api.deps import (
+    get_authenticated_user,
+    get_company_profile_service,
+    get_match_service,
+)
 from app.infra.db.repositories.company_profile_repository import ProfileRows
 from app.main import app
 from app.services.company_profile_service import CompanyProfileService
@@ -155,19 +159,52 @@ class FakeWriteRepo:
         return self.saved or ProfileRows(None, [], [], [], [], [], [], [])
 
 
+class FakeMatchService:
+    """저장 후 재계산 훅 검증용 — 실제 DB를 안 건드린다."""
+
+    def __init__(self):
+        self.recomputed: list[int] = []
+        self.raise_on_call = False
+
+    def recompute_for_company(self, company_id):
+        if self.raise_on_call:
+            raise RuntimeError("recompute boom")
+        self.recomputed.append(company_id)
+        return 0
+
+
 @pytest.fixture
 def write_client():
     service = CompanyProfileService(FakeWriteRepo(), FakeMasterRepo())
+    match_fake = FakeMatchService()
 
     def _make(company_id: str = "9001") -> TestClient:
         app.dependency_overrides[get_company_profile_service] = lambda: service
+        app.dependency_overrides[get_match_service] = lambda: match_fake
         app.dependency_overrides[get_authenticated_user] = lambda: SimpleNamespace(
             company_id=company_id, email=None
         )
         return TestClient(app)
 
+    _make.match_fake = match_fake
     yield _make
     app.dependency_overrides.clear()
+
+
+def test_put_triggers_match_recompute(write_client):
+    """★ 자격 저장 성공 시 그 회사 매칭 재계산이 호출된다(신선도)."""
+    c = write_client()
+    r = c.put("/me/profile", json={"licenses": [{"license_code": "0037"}]})
+    assert r.status_code == 200
+    assert write_client.match_fake.recomputed == [9001]   # 토큰의 company_id
+
+
+def test_put_succeeds_even_if_recompute_fails(write_client):
+    """재계산이 터져도 저장은 성공(200) — 저장은 이미 커밋, 매칭은 배치가 채운다."""
+    write_client.match_fake.raise_on_call = True
+    c = write_client()
+    r = c.put("/me/profile", json={})
+    assert r.status_code == 200
 
 
 def test_put_fills_names_from_master(write_client):

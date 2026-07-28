@@ -24,6 +24,11 @@ class MatchService:
     def __init__(self, repository: MatchRepository):
         self._repo = repository
 
+    def recompute_for_company(self, company_id: int) -> int:
+        """그 회사 매칭을 재계산(전체 교체). 자격 저장 등 입력 변경 후 호출.
+        반환은 적재된 행 수. 실패는 그대로 전파(호출자가 경계 처리)."""
+        return self._repo.recompute_for_company(company_id)
+
     def list_matches(
         self,
         *,
