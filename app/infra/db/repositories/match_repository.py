@@ -123,3 +123,64 @@ class MatchRepository:
             .select_from(MatchResult)
             .where(MatchResult.company_id == company_id)
         ).scalar_one()
+
+    # ── 주기 갱신(#80) ────────────────────────────────────────
+    # 증분: 새로 정규화된 공고 행만 UPSERT. 전체 교체를 5분마다 하면 회사 100곳
+    # 기준 14만 행 × 288회/일이 dead tuple·WAL로 쌓여 RDS가 그 청소에 매달린다.
+    # 실제로 5분 사이 바뀌는 건 새로 들어온 공고 수십 건뿐이라 그것만 쓴다.
+    #
+    # computed_at을 UPDATE에서 명시적으로 갱신한다 — 기본값은 INSERT에만 적용되고,
+    # 이 값이 다음 주기의 '어디까지 계산했나' 기준이라 안 올리면 같은 공고를 계속 다시 쓴다.
+    _UPSERT_SINCE_SQL = text(
+        "INSERT INTO match_results "
+        "(company_id, bid_ntce_no, bid_ntce_ord, verdict, required, satisfied, "
+        " gate_failed, need_review, axes, normalizer_version) "
+        "SELECT * FROM compute_match_results(CAST(:cid AS bigint)) m "
+        "WHERE (m.bid_ntce_no, m.bid_ntce_ord) IN ("
+        "  SELECT s.bid_ntce_no, s.bid_ntce_ord FROM bid_require_summary s"
+        "  WHERE s.normalized_at > :since) "
+        "ON CONFLICT (company_id, bid_ntce_no, bid_ntce_ord) DO UPDATE SET "
+        "  verdict = EXCLUDED.verdict, required = EXCLUDED.required, "
+        "  satisfied = EXCLUDED.satisfied, gate_failed = EXCLUDED.gate_failed, "
+        "  need_review = EXCLUDED.need_review, axes = EXCLUDED.axes, "
+        "  normalizer_version = EXCLUDED.normalizer_version, "
+        "  computed_at = (now() AT TIME ZONE 'Asia/Seoul')"
+    )
+
+    def latest_normalized_at(self) -> datetime | None:
+        """자격요건 정규화가 마지막으로 진행된 시각(normalize 람다가 찍는다)."""
+        return self._session.execute(
+            text("SELECT max(normalized_at) FROM bid_require_summary")
+        ).scalar_one()
+
+    def latest_computed_at(self) -> datetime | None:
+        """매칭이 마지막으로 계산된 시각. 증분 갱신의 하한선."""
+        return self._session.execute(
+            select(func.max(MatchResult.computed_at))
+        ).scalar_one()
+
+    def active_company_ids(self) -> list[int]:
+        """탈퇴하지 않은 회사 id. 탈퇴 회사는 계산해봐야 볼 사람이 없다."""
+        rows = self._session.execute(
+            text("SELECT id FROM companies WHERE deleted_at IS NULL ORDER BY id")
+        ).scalars().all()
+        return list(rows)
+
+    def upsert_since(self, company_id: int, since: datetime) -> int:
+        """since 이후 정규화된 공고에 대해서만 그 회사 매칭을 갱신한다.
+
+        마감이 지나 계산 대상에서 빠진 공고 행은 여기서 지워지지 않는다 —
+        조회가 마감으로 거르므로 화면엔 영향이 없고, 정리는 야간 전체 재계산이
+        맡는다(증분에 DELETE를 섞으면 전체 스캔이라 증분의 이점이 사라진다).
+        반환: 이번에 쓴 행 수.
+        """
+        s = self._session
+        try:
+            result = s.execute(
+                self._UPSERT_SINCE_SQL, {"cid": company_id, "since": since}
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
+        return result.rowcount or 0

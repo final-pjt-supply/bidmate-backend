@@ -48,6 +48,8 @@ py -3.11 -m venv .venv
 - 프론트는 기본적으로 `http://localhost:8000`을 바라보게 설정한다.
 - 인증 없이 고정 회사로 확인하려면 로컬 `.env`에 `AUTH_DISABLED=true`와
   `DEV_COMPANY_ID=<회사 ID>`를 넣는다. 운영 환경에서는 절대 활성화하지 않는다.
+- 매칭 주기 갱신(`MATCH_REFRESH_ENABLED`)은 **로컬 기본 off**다. 로컬도 같은 운영
+  RDS에 붙으므로 개발 중 노트북이 배치를 돌리지 않게 막아둔 것 — 실배포에서만 켠다.
 - RDS와 OpenSearch가 VPC 내부에 있으면 각각 SSH 터널을 먼저 열어야 한다. 접속 정보와
   비밀값은 `.env`에만 두고 README나 Git에 넣지 않는다.
 
@@ -146,10 +148,12 @@ Nginx 전환·스모크 테스트·자동 롤백은 [deploy/CD.md](deploy/CD.md)
 
 ## 주의
 
-- **외부 소유 테이블**: `bid_table`·`bid_attachments`(파이프라인), 회사 프로필 8테이블·
-  `match_results`(에이전트/배치)는 이 서버가 **읽기 매핑**만 한다. 스키마 변경(DDL)은
-  소유 측 + 팀 협의로만.
-- `companies`·`company_bid_scraps`는 API가 쓰기(가입 JIT 생성·탈퇴·스크랩).
+- **외부 소유 테이블**: `bid_table`·`bid_attachments`(파이프라인), 회사 프로필 8테이블은
+  이 서버가 **읽기 매핑**만 한다. 스키마 변경(DDL)은 소유 측 + 팀 협의로만.
+- `companies`·`company_bid_scraps`·`chat_sessions`·`chat_messages`는 API가 쓰기.
+- `match_results`는 **스키마는 외부 소유(DDL 금지)지만 적재는 API가 한다** — 자격 저장
+  훅(#75)과 주기 갱신 스케줄러(#80)가 DB 함수 `compute_match_results()` 결과로 채운다.
+  계산 로직은 그 DB 함수에 있고 이 리포에 없다.
 - 회사 데이터는 `company_id`로 격리(멀티테넌시). 공고 원본은 공용.
 - 대화 에이전트는 `bidmate-agents`를 같은 프로세스에 임베드(ADR 0005). Bedrock·OpenSearch·
   Cloudflare 접속 설정은 `.env`로 주입한다.

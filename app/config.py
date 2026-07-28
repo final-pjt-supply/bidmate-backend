@@ -69,6 +69,15 @@ class Settings(BaseSettings):
     auth_disabled: bool = Field(default=False)
     dev_company_id: str = Field(default="")
 
+    # --- 매칭 주기 갱신(#80) ---
+    # 신규 공고를 match_results에 반영하는 내장 스케줄러. 기본 off — 로컬/테스트가
+    # 운영 RDS에 붙은 채 배치를 돌리는 사고를 막는다. 실배포에서만 .env로 켠다.
+    match_refresh_enabled: bool = Field(default=False)
+    # 수집·정규화가 5분 주기라 그보다 촘촘하게 돌 이유가 없다.
+    match_refresh_interval_sec: int = Field(default=300)
+    # 전체 재계산(마감 지난 행 정리)을 도는 KST 시각. 트래픽이 가장 적은 새벽.
+    match_refresh_full_hour: int = Field(default=4)
+
     # --- 개인화 추천(제목 임베딩) ---
     # 제목 벡터는 입찰 ETL이 bid_chunks 인덱스에 type=title로 적재한다. API는 새 벡터를
     # 저장하지 않고 회사 관심 쿼리만 임베딩한 뒤, 자격 후보 bid_id를 knn filter로 건다.
