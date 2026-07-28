@@ -8,7 +8,7 @@
 """
 from datetime import datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.domain.enums import QualStatus
@@ -91,3 +91,35 @@ class MatchRepository:
             order = (Bid.bid_clse_dt.asc().nulls_last(), Bid.bid_id.asc())
         stmt = stmt.order_by(*order).limit(limit).offset(offset)
         return [(row[0], row[1]) for row in self._session.execute(stmt).all()]
+
+    # 컬럼 순서는 compute_match_results의 RETURNS TABLE 순서와 정확히 일치한다
+    # (SELECT * 로 그대로 들어간다). computed_at은 기본값(now KST)이라 뺀다.
+    _RESEED_SQL = text(
+        "INSERT INTO match_results "
+        "(company_id, bid_ntce_no, bid_ntce_ord, verdict, required, satisfied, "
+        " gate_failed, need_review, axes, normalizer_version) "
+        "SELECT * FROM compute_match_results(CAST(:cid AS bigint))"
+    )
+    _DELETE_SQL = text("DELETE FROM match_results WHERE company_id = :cid")
+
+    def recompute_for_company(self, company_id: int) -> int:
+        """그 회사 매칭을 전체 교체(멱등) — 자격/공고 변경 후 신선도 유지용.
+
+        compute_match_results(company_id) DB 함수 결과로 match_results를 다시
+        채운다. DELETE+INSERT를 한 트랜잭션으로 커밋(원자적). 실패 시 롤백 후
+        재던진다 — 호출자(라우터)가 저장 자체는 성공시키고 로그만 남긴다.
+        일배치(공고 신선도)와 겹쳐도 회사 단위 full replace라 last-writer-wins.
+        """
+        s = self._session
+        try:
+            s.execute(self._DELETE_SQL, {"cid": company_id})
+            s.execute(self._RESEED_SQL, {"cid": company_id})
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
+        return s.execute(
+            select(func.count())
+            .select_from(MatchResult)
+            .where(MatchResult.company_id == company_id)
+        ).scalar_one()

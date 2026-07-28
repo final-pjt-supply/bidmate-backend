@@ -42,7 +42,9 @@ venv/
 # 환경변수 / 비밀키
 .env
 .env.airflow
+.env.ec2
 *.key
+*.pem
 
 # 로컬 Airflow 테스트
 docker-compose.airflow.yml
