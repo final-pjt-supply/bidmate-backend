@@ -49,8 +49,10 @@ class ChatRepository:
         sid = _to_uuid(session_id)
         row = self._s.get(ChatSession, sid)
         if row is not None:
-            if row.company_id != company_id:
-                raise SessionForbiddenError(str(session_id))   # IDOR
+            # 삭제한 세션은 되살리지 않는다 — 클라가 지운 session_id를 그대로 들고
+            # 다음 질문을 보내면 목록에 안 보이는 세션에 메시지만 쌓인다.
+            if row.company_id != company_id or row.deleted_at is not None:
+                raise SessionForbiddenError(str(session_id))   # IDOR / 삭제됨
             ctx = (SessionContext.model_validate(row.session_context)
                    if row.session_context else None)
         else:
@@ -114,6 +116,51 @@ class ChatRepository:
         stmt = (select(ChatMessage).where(ChatMessage.session_id == sid)
                 .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc()))
         return row, list(self._s.execute(stmt).scalars().all())
+
+    # ── 삭제 ──────────────────────────────────────────────────
+    def soft_delete_session(self, session_id, company_id: int) -> None:
+        """대화방 삭제 — deleted_at에 시각만 기록(행은 남긴다).
+
+        조회(list/count/get)가 이미 deleted_at IS NULL로 거르므로 화면에서 사라진다.
+        실삭제는 회사 탈퇴 시 FK CASCADE가 맡는다(개보법 삭제권).
+        없음/남의 것/이미 삭제됨은 모두 SessionForbiddenError → 라우터 404(존재 은닉).
+        """
+        sid = _to_uuid(session_id)
+        row = self._s.get(ChatSession, sid)
+        if row is None or row.company_id != company_id or row.deleted_at is not None:
+            raise SessionForbiddenError(str(session_id))
+        row.deleted_at = _now()
+        self._s.commit()
+
+    def delete_last_turn(self, session_id, company_id: int) -> int:
+        """마지막 턴 취소 — 끝 메시지 한 쌍(assistant + 직전 user)을 실제로 지운다.
+
+        '되돌리기' 성격이라 하드 삭제한다(chat_messages엔 소프트 삭제 칸이 없다).
+        session_context는 NULL로 비운다 — 직전 컨텍스트를 보관하지 않아 되돌릴 수
+        없기 때문. 지운 말을 봇이 계속 기억하는 것보다 문맥 초기화가 낫다.
+        에이전트가 실패해 user 메시지만 남은 턴은 그 한 건만 지운다.
+        반환: 지운 메시지 수(0 = 지울 게 없음 → 라우터 404).
+        """
+        sid = _to_uuid(session_id)
+        row = self._s.get(ChatSession, sid)
+        if row is None or row.company_id != company_id or row.deleted_at is not None:
+            raise SessionForbiddenError(str(session_id))
+
+        stmt = (select(ChatMessage).where(ChatMessage.session_id == sid)
+                .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+                .limit(2))
+        tail = list(self._s.execute(stmt).scalars().all())
+        if not tail:
+            return 0
+        victims = [tail[0]]
+        if tail[0].role == "assistant" and len(tail) > 1 and tail[1].role == "user":
+            victims.append(tail[1])
+        for m in victims:
+            self._s.delete(m)
+        row.session_context = None
+        row.updated_at = _now()
+        self._s.commit()
+        return len(victims)
 
     @staticmethod
     def _title(q: str) -> str | None:
