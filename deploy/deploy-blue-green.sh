@@ -72,7 +72,14 @@ version="${image_uri##*:}"
 registry="${image_uri%%/*}"
 
 active_slot=""
-linked_conf="$(readlink -f "${ACTIVE_LINK}" 2>/dev/null || true)"
+# readlink -f prints the canonical path even when ACTIVE_LINK does not exist,
+# which would break first-run detection (a clean box has no link yet). Only
+# resolve when it is a real symlink; otherwise treat it as absent.
+if [[ -L "${ACTIVE_LINK}" ]]; then
+  linked_conf="$(readlink -f "${ACTIVE_LINK}" 2>/dev/null || true)"
+else
+  linked_conf=""
+fi
 case "${linked_conf}" in
   "${NGINX_ROOT}/blue.conf")
     active_slot="blue"
@@ -121,7 +128,13 @@ else
 fi
 
 candidate_conf="${NGINX_ROOT}/${candidate_slot}.conf"
-previous_link="$(readlink -f "${ACTIVE_LINK}" 2>/dev/null || true)"
+# Same guard as above: only resolve a genuine symlink so first-run rollback
+# releases port 8000 for Uvicorn instead of restoring a non-existent link.
+if [[ -L "${ACTIVE_LINK}" ]]; then
+  previous_link="$(readlink -f "${ACTIVE_LINK}" 2>/dev/null || true)"
+else
+  previous_link=""
+fi
 legacy_was_active="false"
 legacy_stopped="false"
 switched="false"
