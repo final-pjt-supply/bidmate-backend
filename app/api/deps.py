@@ -31,6 +31,7 @@ from app.infra.db.session import get_session
 from app.infra.search.recommendation_search import RecommendationSearch
 from app.infra.s3.event_sink import get_event_sink
 from app.services.bid_service import BidService
+from app.services.chat_query_service import ChatQueryService
 from app.services.company_profile_service import CompanyProfileService
 from app.services.event_service import EventService
 from app.services.master_service import MasterService
@@ -179,3 +180,7 @@ def get_event_service() -> EventService:
 def get_agent_chat_service(db: Session = Depends(get_db)) -> AgentChatService:
     # 세션/대화는 RDS 영속(ADR-22) — ChatRepository로 세션 컨텍스트·메시지 저장.
     return AgentChatService(ChatRepository(db))
+
+
+def get_chat_query_service(db: Session = Depends(get_db)) -> ChatQueryService:
+    return ChatQueryService(ChatRepository(db))
