@@ -17,6 +17,7 @@ from app.api.v1 import (
     profile,
     recommendations,
     scraps,
+    sessions,
 )
 
 api_router = APIRouter()
@@ -29,3 +30,4 @@ api_router.include_router(profile.router)
 api_router.include_router(matches.router)
 api_router.include_router(recommendations.router)
 api_router.include_router(masters.router)
+api_router.include_router(sessions.router)
