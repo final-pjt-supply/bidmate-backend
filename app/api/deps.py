@@ -6,6 +6,7 @@
   엔드포인트가 '현재 사용자(company_id)'를 받는 통로를 지금 만들어 두고 통과시킨다.
   회사별 점수 정렬(sort=score)도 같은 통로(CurrentUser.company_id)로 들어온다.
 """
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import lru_cache
@@ -17,7 +18,7 @@ from app.agents.chat_rate_limit import RateLimited
 from app.agents.chat_rate_limit import guard as _chat_guard
 from app.agents.chat_service import AgentChatService
 from app.config import get_settings
-from app.infra.auth.cognito import TokenError, verify_id_token
+from app.infra.auth.cognito import TokenError, TokenServiceError, verify_id_token
 from app.infra.db.repositories.bid_repository import BidRepository
 from app.infra.db.repositories.company_profile_repository import (
     CompanyProfileRepository,
@@ -45,6 +46,8 @@ from app.services.master_service import MasterService
 from app.services.match_service import MatchService
 from app.services.recommendation_service import RecommendationService
 from app.services.scrap_service import ScrapService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -133,12 +136,28 @@ def get_authenticated_user(
 
 
 def _verify_or_401(token: str):
+    """토큰을 검증한다. 실패 사유는 로그로만 남기고 응답에는 싣지 않는다.
+
+    검증 실패 사유를 그대로 돌려주면 공격자가 가짜 토큰을 던져가며 "무엇을 고쳐야
+    통과하는지"를 알아낼 수 있다. 특히 'Signature has expired'는 서명이 맞았다는
+    사실까지 알려준다. 사용자가 할 수 있는 일은 어차피 '다시 로그인' 하나뿐이라
+    상세를 알려줄 실익도 없다.
+    """
     try:
         return verify_id_token(token)
+    except TokenServiceError as exc:
+        # 우리 쪽 문제(JWKS 조회 실패·설정 누락)다. 401로 응답하면 멀쩡한 사용자에게
+        # "당신 토큰이 무효"라고 하는 셈이고, 진짜 원인이 가려져 디버깅도 어려워진다.
+        logger.error("인증 서비스 사용 불가: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="인증 서비스를 일시적으로 사용할 수 없어요. 잠시 후 다시 시도해 주세요.",
+        ) from exc
     except TokenError as exc:
+        logger.warning("토큰 검증 실패: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(exc),
+            detail="인증에 실패했어요. 다시 로그인해 주세요.",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
