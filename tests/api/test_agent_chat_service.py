@@ -42,6 +42,15 @@ class FakeChatRepo:
         self.messages.append((session_id, "user", user_query))
         return ctx
 
+    def count_turns(self, session_id, company_id):
+        if session_id not in self.sessions:
+            return 0
+        owner, _ = self.sessions[session_id]
+        if owner != company_id:
+            raise SessionForbiddenError(session_id)   # IDOR
+        return sum(1 for s, role, _ in self.messages
+                   if s == session_id and role == "user")
+
     def close_turn(self, session_id, resp):
         owner, _ = self.sessions[session_id]
         self.sessions[session_id] = (owner, resp.session_context)
@@ -118,6 +127,21 @@ def test_user_message_persisted_even_if_agent_fails():
         AgentChatService(repo, broken).chat(query="질문", company_id="9001", session_id="s1")
     assert ("s1", "user", "질문") in repo.messages
     assert not any(role == "assistant" for _, role, _ in repo.messages)
+
+
+def test_session_soft_cap_returns_clarify_without_llm():
+    """세션 20턴 초과 — LLM을 부르지 않고 clarify로 새 대화를 유도(비용 방어)."""
+    repo, runner = FakeChatRepo(), FakeRunner([])   # runner는 호출되면 안 됨
+    repo.sessions["full"] = (9001, None)
+    repo.messages = [("full", "user", f"q{i}") for i in range(20)]   # 20턴 채움
+    sid, resp = AgentChatService(repo, runner).chat(
+        query="21번째", company_id="9001", session_id="full")
+    assert sid == "full"
+    assert resp.action == "clarify"
+    assert "새 대화" in resp.clarify_message
+    assert runner.requests == []            # LLM 미호출
+    # 21번째 user 메시지가 안 쌓였다(open_turn 안 탐)
+    assert sum(1 for s, r, _ in repo.messages if s == "full" and r == "user") == 20
 
 
 def test_session_busy_when_turn_in_flight():

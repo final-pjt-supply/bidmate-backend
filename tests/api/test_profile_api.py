@@ -231,6 +231,15 @@ def test_put_empty_profile_ok(write_client):
     assert r.json()["licenses"] == [] and r.json()["qualification"] is None
 
 
+def test_put_too_many_items_is_422(write_client):
+    """배열 상한 초과 — 요청 파싱 단계에서 422(서비스 도달 전, 남용 방어)."""
+    c = write_client()
+    r = c.put("/me/profile", json={
+        "regions": [{"region_code": "11", "region_type": "hq"}] * 31   # max_length=30
+    })
+    assert r.status_code == 422
+
+
 def test_put_unknown_code_is_422(write_client):
     c = write_client()
     r = c.put("/me/profile", json={"licenses": [{"license_code": "9999"}]})

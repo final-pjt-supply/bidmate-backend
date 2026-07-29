@@ -21,8 +21,15 @@ import threading
 from contextlib import contextmanager
 from typing import Callable
 
-from agents.schemas import AgentRequest, AgentResponse, EntryContext
+from agents.schemas import (
+    AgentRequest,
+    AgentResponse,
+    EntryContext,
+    Filters,
+    SessionContext,
+)
 
+from app.config import get_settings
 from app.infra.db.repositories.chat_repository import ChatRepository
 
 # 세션당 동시 1턴 — 인프로세스 락(단일 프로세스 전제).
@@ -65,6 +72,11 @@ class AgentChatService:
         cid = int(company_id)
         sid = session_id or self._repo.new_session_id()
         with _one_turn(sid):
+            # 세션 길이 소프트캡 — 기존 세션이 상한을 넘으면 LLM을 부르지 않고
+            # 새 대화를 유도한다(비용·무한 사용 방지). 새 세션은 캡 대상이 아니다.
+            if session_id is not None:
+                if self._repo.count_turns(sid, cid) >= get_settings().session_max_turns:
+                    return sid, self._capped_response()
             # 세션 확보(소유 검증/신규 생성) + user 메시지 커밋. 반환=저장된 컨텍스트.
             ctx = self._repo.open_turn(sid, cid, query)
             req = AgentRequest(query=query, company_id=company_id,
@@ -73,3 +85,13 @@ class AgentChatService:
             resp = self._run(req)   # 실패 시 user 메시지는 남고 가드 해제(finally)
             self._repo.close_turn(sid, resp)   # assistant + 컨텍스트 커밋
         return sid, resp
+
+    @staticmethod
+    def _capped_response() -> AgentResponse:
+        """세션 길이 소프트캡 응답 — LLM 없이 새 대화 유도. 에러가 아니라 안내."""
+        return AgentResponse(
+            action="clarify",
+            clarify_message="대화가 너무 길어졌어요. 새 대화를 시작해 주세요.",
+            session_context=SessionContext(
+                last_bid_ids=[], last_summary="", last_filters=Filters()),
+        )

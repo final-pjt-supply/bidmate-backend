@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     auth_disabled: bool = Field(default=False)
     dev_company_id: str = Field(default="")
 
+    # --- 챗 세션 길이 상한 ---
+    # 한 대화가 무한정 길어지는 것을 막는 소프트캡. 초과하면 LLM을 부르지 않고
+    # "새 대화를 시작하라"고 안내한다(문맥 비용·무한 사용 방지). 에이전트가 요약을
+    # 들고 다녀 토큰이 폭증하진 않으므로 하드 차단이 아닌 가드레일 성격.
+    session_max_turns: int = Field(default=20)
+
     # --- 매칭 주기 갱신(#80) ---
     # 신규 공고를 match_results에 반영하는 내장 스케줄러. 기본 off — 로컬/테스트가
     # 운영 RDS에 붙은 채 배치를 돌리는 사고를 막는다. 실배포에서만 .env로 켠다.

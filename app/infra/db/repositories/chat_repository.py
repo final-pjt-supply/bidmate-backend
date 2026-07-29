@@ -10,7 +10,7 @@ JSONB로 직렬화 저장한다. 모든 접근은 company_id로 격리(멀티테
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from agents.schemas import AgentResponse, SessionContext
@@ -69,6 +69,24 @@ class ChatRepository:
             session_id=sid, role="user", content=user_query, created_at=_now()))
         self._s.commit()
         return ctx
+
+    def count_turns(self, session_id, company_id: int) -> int:
+        """세션의 user 메시지 수(=턴 수). 소프트캡 판정용.
+
+        모르는 session_id(아직 없는 새 대화)는 0 — 캡에 안 걸린다. 다른 회사
+        소유거나 삭제된 세션이면 IDOR로 막는다(open_turn과 같은 신뢰 기준).
+        """
+        row = self._s.get(ChatSession, _to_uuid(session_id))
+        if row is None:
+            return 0
+        if row.company_id != company_id or row.deleted_at is not None:
+            raise SessionForbiddenError(str(session_id))
+        return self._s.execute(
+            select(func.count())
+            .select_from(ChatMessage)
+            .where(ChatMessage.session_id == row.session_id,
+                   ChatMessage.role == "user")
+        ).scalar_one()
 
     def close_turn(self, session_id, resp: AgentResponse) -> None:
         """턴 성공 — assistant 메시지 + session_context 갱신 커밋."""

@@ -145,11 +145,14 @@ class ProfileUpsertRequest(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
 
+    # 배열별 최대 항목 수 — 요청 한 번으로 수만 건을 밀어넣는 남용을 막는다.
+    # 정상 회사 데이터를 넉넉히 덮되(실적 대장이 가장 많음) 위로 상한을 둔다.
     qualification: QualificationIn | None = None
-    regions: list[RegionIn] = []
-    licenses: list[LicenseIn] = []
-    items: list[ItemIn] = []
-    certs: list[CertIn] = []
-    personnel: list[PersonnelIn] = []
-    capacity_evals: list[CapacityEvalIn] = []
-    performance_records: list[PerformanceRecordIn] = []
+    regions: list[RegionIn] = Field(default_factory=list, max_length=30)
+    licenses: list[LicenseIn] = Field(default_factory=list, max_length=100)
+    items: list[ItemIn] = Field(default_factory=list, max_length=200)
+    certs: list[CertIn] = Field(default_factory=list, max_length=50)
+    personnel: list[PersonnelIn] = Field(default_factory=list, max_length=100)
+    capacity_evals: list[CapacityEvalIn] = Field(default_factory=list, max_length=100)
+    performance_records: list[PerformanceRecordIn] = Field(
+        default_factory=list, max_length=500)
