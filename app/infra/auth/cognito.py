@@ -18,12 +18,29 @@ from functools import lru_cache
 
 import jwt
 from jwt import PyJWKClient
+from jwt.exceptions import PyJWKClientConnectionError
 
 from app.config import get_settings
 
 
 class TokenError(Exception):
-    """토큰이 없거나 유효하지 않음 — 호출부에서 401로 변환한다."""
+    """토큰이 없거나 유효하지 않음 — 호출부에서 401로 변환한다.
+
+    메시지에는 검증이 왜 실패했는지가 담긴다. 이건 서버 로그용이며, 그대로 응답에
+    실으면 공격자에게 "무엇을 고쳐야 통과하는지"를 알려주게 된다(특히 'Signature
+    has expired'는 서명이 맞았다는 사실까지 노출한다). 호출부는 일반 메시지로 바꿔
+    응답하고 원문은 로그로만 남긴다.
+    """
+
+
+class TokenServiceError(Exception):
+    """토큰을 '지금' 검증할 수 없음 — 호출부에서 503으로 변환한다.
+
+    JWKS(공개키) 조회가 네트워크 문제로 실패했거나 Cognito 설정이 비어 있는 경우다.
+    토큰 자체는 멀쩡할 수 있으므로 401(=당신 토큰이 무효)로 응답하면 안 된다 —
+    사용자는 멀쩡한데 로그인이 풀린 것처럼 보이고, 진짜 원인(우리 쪽 장애)이 가려져
+    디버깅이 어려워진다.
+    """
 
 
 @dataclass(frozen=True)
@@ -49,7 +66,8 @@ def _jwk_client() -> PyJWKClient:
 def verify_id_token(token: str) -> CognitoIdentity:
     settings = get_settings()
     if not settings.auth_configured:
-        raise TokenError("Cognito 설정(user pool / client id)이 비어 있습니다")
+        # 토큰 탓이 아니라 서버가 검증할 준비가 안 된 상태다.
+        raise TokenServiceError("Cognito 설정(user pool / client id)이 비어 있습니다")
 
     try:
         signing_key = _jwk_client().get_signing_key_from_jwt(token)
@@ -61,7 +79,12 @@ def verify_id_token(token: str) -> CognitoIdentity:
             issuer=settings.cognito_issuer,       # iss 검증
             options={"require": ["exp", "iss", "aud", "sub"]},
         )
-    except jwt.PyJWTError as exc:  # 서명/만료/iss/aud 불일치 등
+    except PyJWKClientConnectionError as exc:
+        # JWKS를 못 받아온 것뿐이다 — 토큰은 멀쩡할 수 있다. 401로 뭉개면 Cognito
+        # 키 서버 장애 때 전 사용자가 "토큰 무효"로 보인다. kid 불일치 같은 토큰
+        # 문제는 PyJWKClientError(비-Connection)라 아래 401 경로로 간다.
+        raise TokenServiceError(f"JWKS 조회 실패: {exc}") from exc
+    except jwt.PyJWTError as exc:  # 서명/만료/iss/aud 불일치, kid 불일치 등
         raise TokenError(f"토큰 검증 실패: {exc}") from exc
 
     # 액세스 토큰은 aud가 없고 email도 없다 — ID 토큰만 허용한다.
