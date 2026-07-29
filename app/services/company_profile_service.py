@@ -152,6 +152,7 @@ class CompanyProfileService:
             personnel=[
                 CompanyPersonnel(
                     company_id=company_id, qual_code=p.qual_code,
+                    field_family=p.field_family,
                     qual_name=personnel_map.get(p.qual_code), headcount=p.headcount,
                 )
                 for p in payload.personnel
@@ -195,7 +196,9 @@ class CompanyProfileService:
             "licenses": [x.license_code for x in payload.licenses],
             "items": [i.item_code for i in payload.items],
             "certs": [c.cert_code for c in payload.certs],
-            "personnel": [p.qual_code for p in payload.personnel],
+            # D-19: 인력은 (자격, 분야) 조합이 유일해야 한다 — 같은 자격도 분야가
+            # 다르면 별개 행이다. qual_code만으로 검사하면 정당한 다중행이 422가 된다.
+            "personnel": [(p.qual_code, p.field_family) for p in payload.personnel],
             "capacity_evals": [e.license_code for e in payload.capacity_evals],
         }
         for name, codes in sections.items():

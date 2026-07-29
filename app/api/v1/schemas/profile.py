@@ -46,6 +46,7 @@ class CertOut(_Section):
 
 class PersonnelOut(_Section):
     qual_code: str
+    field_family: str | None = None   # D-19 분야(NULL=분야 무관)
     qual_name: str | None = None
     headcount: int | None = None
 
@@ -127,6 +128,9 @@ class CertIn(_Input):
 
 class PersonnelIn(_Input):
     qual_code: str = Field(min_length=1, max_length=20)
+    # D-19 인력 분야. 허용값(15종)은 DB CHECK에 위임 — 잘못된 코드는 저장 시 422.
+    # None = 분야 무관(등급만 요구하는 공고용). 자격당 분야별로 여러 행을 보낼 수 있다.
+    field_family: str | None = Field(default=None, max_length=12)
     headcount: int = Field(gt=0)   # NOT NULL, CHECK(headcount > 0)
 
 

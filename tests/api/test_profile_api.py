@@ -36,7 +36,8 @@ def _rows_for(company_id: int) -> ProfileRows:
         items=[SimpleNamespace(item_code="1234", item_name="노트북",
                                has_direct_production=True, direct_prod_valid_until=None)],
         certs=[SimpleNamespace(cert_code="C1", cert_name="ISO9001", valid_until=None)],
-        personnel=[SimpleNamespace(qual_code="Q1", qual_name="정보처리기사", headcount=3)],
+        personnel=[SimpleNamespace(qual_code="Q1", field_family=None,
+                                   qual_name="정보처리기사", headcount=3)],
         capacity_evals=[SimpleNamespace(license_code="0037", license_name="전기공사업",
                                         eval_amount=1_000_000, eval_year=2025)],
         performance_records=[SimpleNamespace(record_id=1, contract_name="A 구축사업",
@@ -242,6 +243,54 @@ def test_put_duplicate_code_is_422(write_client):
     r = c.put("/me/profile", json={
         "licenses": [{"license_code": "0037"}, {"license_code": "0037"}]
     })
+    assert r.status_code == 422
+
+
+# ── 인력 분야(field_family, D-19) ────────────────────────────────────
+def test_put_personnel_field_family_round_trips(write_client):
+    """★ 저장한 인력 분야가 조회 응답에 그대로 보존된다."""
+    c = write_client()
+    r = c.put("/me/profile", json={
+        "personnel": [{"qual_code": "Q1", "field_family": "ARCH", "headcount": 2}]
+    })
+    assert r.status_code == 200
+    p = r.json()["personnel"]
+    assert len(p) == 1
+    assert p[0]["field_family"] == "ARCH"
+    assert p[0]["headcount"] == 2
+
+
+def test_put_same_qual_different_field_family_ok(write_client):
+    """★ 같은 자격도 분야가 다르면 별개 행 — 저장 성공, 둘 다 보존."""
+    c = write_client()
+    r = c.put("/me/profile", json={"personnel": [
+        {"qual_code": "Q1", "field_family": "ARCH", "headcount": 1},
+        {"qual_code": "Q1", "field_family": "CIVIL", "headcount": 2},
+    ]})
+    assert r.status_code == 200
+    p = r.json()["personnel"]
+    assert len(p) == 2
+    assert {row["field_family"] for row in p} == {"ARCH", "CIVIL"}
+
+
+def test_put_null_and_typed_field_family_not_duplicate(write_client):
+    """분야 무관(None)과 분야 지정(ARCH)은 서로 다른 행 — 중복 아님."""
+    c = write_client()
+    r = c.put("/me/profile", json={"personnel": [
+        {"qual_code": "Q1", "headcount": 1},                       # field_family=None
+        {"qual_code": "Q1", "field_family": "ARCH", "headcount": 1},
+    ]})
+    assert r.status_code == 200
+    assert len(r.json()["personnel"]) == 2
+
+
+def test_put_exact_duplicate_qual_and_field_is_422(write_client):
+    """(자격, 분야)가 완전히 같은 두 행은 PK 충돌 → 미리 422."""
+    c = write_client()
+    r = c.put("/me/profile", json={"personnel": [
+        {"qual_code": "Q1", "field_family": "ARCH", "headcount": 1},
+        {"qual_code": "Q1", "field_family": "ARCH", "headcount": 3},
+    ]})
     assert r.status_code == 422
 
 
