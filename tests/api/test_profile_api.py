@@ -231,15 +231,6 @@ def test_put_empty_profile_ok(write_client):
     assert r.json()["licenses"] == [] and r.json()["qualification"] is None
 
 
-def test_put_too_many_items_is_422(write_client):
-    """배열 상한 초과 — 요청 파싱 단계에서 422(서비스 도달 전, 남용 방어)."""
-    c = write_client()
-    r = c.put("/me/profile", json={
-        "regions": [{"region_code": "11", "region_type": "hq"}] * 31   # max_length=30
-    })
-    assert r.status_code == 422
-
-
 def test_put_unknown_code_is_422(write_client):
     c = write_client()
     r = c.put("/me/profile", json={"licenses": [{"license_code": "9999"}]})
@@ -274,3 +265,46 @@ def test_put_requires_login(write_client):
     write_client()
     app.dependency_overrides.pop(get_authenticated_user, None)
     assert TestClient(app).put("/me/profile", json={}).status_code == 401
+
+
+# ── 입력 상한(배열 개수) ────────────────────────────────────────────
+# 한 요청으로 수만 행 INSERT + 매칭 전량 재계산을 유발하는 남용을 막는다.
+from pydantic import ValidationError  # noqa: E402
+
+from app.api.v1.schemas.profile import (  # noqa: E402
+    _MAX_ROWS,
+    _MAX_ROWS_LARGE,
+    ProfileUpsertRequest,
+)
+
+
+def test_bounded_section_over_cap_rejected():
+    """코드 도메인이 작은 섹션은 _MAX_ROWS를 넘으면 검증 오류."""
+    region = {"region_code": "11", "region_type": "hq"}
+    with pytest.raises(ValidationError):
+        ProfileUpsertRequest(regions=[region] * (_MAX_ROWS + 1))
+
+
+def test_large_section_over_cap_rejected():
+    """품목·실적은 더 크지만 그래도 _MAX_ROWS_LARGE 상한이 있다."""
+    item = {"item_code": "1234"}
+    with pytest.raises(ValidationError):
+        ProfileUpsertRequest(items=[item] * (_MAX_ROWS_LARGE + 1))
+
+
+def test_at_cap_is_accepted():
+    """딱 상한까지는 스키마 검증을 통과한다(경계값)."""
+    region = {"region_code": "11", "region_type": "hq"}
+    item = {"item_code": "1234"}
+    ok = ProfileUpsertRequest(
+        regions=[region] * _MAX_ROWS, items=[item] * _MAX_ROWS_LARGE
+    )
+    assert len(ok.regions) == _MAX_ROWS
+    assert len(ok.items) == _MAX_ROWS_LARGE
+
+
+def test_put_over_cap_is_422(write_client):
+    """상한 초과는 API에서 422로 거절된다(pydantic이 서비스 도달 전에 막음)."""
+    c = write_client()
+    body = {"regions": [{"region_code": "11", "region_type": "hq"}] * (_MAX_ROWS + 1)}
+    assert c.put("/me/profile", json=body).status_code == 422

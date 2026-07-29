@@ -99,9 +99,14 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # email로 기존 회사에 계정을 잇는 경로(get_or_create)는 이메일 소유가 증명된
+    # 경우에만 안전하다. 검증되지 않은 이메일은 없는 것으로 취급해 링크·저장을 막는다
+    # → companies.email 컬럼에는 항상 검증된 값만 들어가고, 남의 회사 가로채기가 불가능.
+    # (표시명 폴백에는 원본 email을 그대로 써도 무방하다 — 저장이 아니라 화면용.)
+    verified_email = identity.email if identity.email_verified else None
     company = repo.get_or_create(
         cognito_sub=identity.sub,
-        email=identity.email,
+        email=verified_email,
         # 회사명은 가입 시 별도로 받기 전까지 이메일 앞부분을 임시 표시명으로 둔다.
         name=identity.name or (identity.email or "").split("@")[0] or "이름 미등록",
     )

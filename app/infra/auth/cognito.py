@@ -33,6 +33,10 @@ class CognitoIdentity:
     sub: str
     email: str | None
     name: str | None
+    # 이메일 소유가 증명됐는가(가입 시 인증코드 확인 등). email로 기존 회사에 계정을
+    # 잇는 경로는 이 값이 True일 때만 안전하다 — 미검증 이메일이면 남의 회사를 가로챌
+    # 수 있다(계정 연결이 소유 증명 없이 일어나므로).
+    email_verified: bool = False
 
 
 @lru_cache
@@ -68,4 +72,14 @@ def verify_id_token(token: str) -> CognitoIdentity:
         sub=claims["sub"],
         email=claims.get("email"),
         name=claims.get("name"),
+        email_verified=_claim_true(claims.get("email_verified")),
     )
+
+
+def _claim_true(value: object) -> bool:
+    """email_verified 클레임을 bool로 정규화한다.
+
+    Cognito ID 토큰은 boolean true로 내려주지만, 문자열 "true"로 오는 경우도 방어한다.
+    문자열 "false"가 truthy로 잘못 해석되지 않도록 명시적으로 비교한다.
+    """
+    return value is True or value == "true"

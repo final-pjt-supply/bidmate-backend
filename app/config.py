@@ -9,8 +9,13 @@ MERGE_DB_* 와는 이름을 분리한다 — 같은 RDS를 가리키더라도 AP
 from functools import lru_cache
 from urllib.parse import quote_plus
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 인증을 꺼도 되는(개발용) 배포 슬롯. 그 외 슬롯(blue/green 등 운영)에서 auth_disabled를
+# 켜면 서버가 아예 뜨지 않는다 — 조용히 무인증 개방되는 것보다 배포가 시끄럽게 실패하는
+# 편이 낫다(fail-fast).
+_AUTH_OPTIONAL_SLOTS = {"local", "dev"}
 
 
 class Settings(BaseSettings):
@@ -74,6 +79,21 @@ class Settings(BaseSettings):
     # "새 대화를 시작하라"고 안내한다(문맥 비용·무한 사용 방지). 에이전트가 요약을
     # 들고 다녀 토큰이 폭증하진 않으므로 하드 차단이 아닌 가드레일 성격.
     session_max_turns: int = Field(default=20)
+
+    @model_validator(mode="after")
+    def _forbid_auth_disabled_in_production(self) -> "Settings":
+        """운영 슬롯에서 인증 비활성화를 금지한다.
+
+        설정을 읽는 시점(get_settings)에 돌아, 조건이 나쁘면 여기서 예외가 나 서버가
+        기동조차 못 한다. 운영 .env에 AUTH_DISABLED=true가 실수로 들어가도 조용히
+        무인증으로 열리지 않고 배포가 즉시 실패한다.
+        """
+        if self.auth_disabled and self.deployment_slot.lower() not in _AUTH_OPTIONAL_SLOTS:
+            raise ValueError(
+                f"AUTH_DISABLED=true는 {sorted(_AUTH_OPTIONAL_SLOTS)} 슬롯에서만 허용된다 "
+                f"(현재 deployment_slot={self.deployment_slot!r}). 운영에서는 인증을 끌 수 없다."
+            )
+        return self
 
     # --- 매칭 주기 갱신(#80) ---
     # 신규 공고를 match_results에 반영하는 내장 스케줄러. 기본 off — 로컬/테스트가

@@ -86,6 +86,14 @@ class ProfileResponse(BaseModel):
 # ── 입력(PUT /me/profile) ─────────────────────────────────────────────
 # 클라는 code만 보낸다 — _name은 서버가 마스터 조회로 채운다(신뢰경계 서버).
 # extra="forbid": 클라가 region_name 등 파생값을 밀어넣지 못하게 막는다(422).
+
+# 배열별 최대 항목 수. 정당한 회사 규모는 넘되, 한 요청이 수만 행 INSERT + 그 직후
+# 매칭 전량 재계산을 유발하는 남용을 막는다(nginx 본문 2MB 한도 안에서도 수만 행이
+# 가능하다). pydantic v2에서 리스트의 max_length는 '항목 개수' 상한이다.
+_MAX_ROWS = 100          # 코드 도메인이 작은 섹션(지역·면허·인증·인력·시평)
+_MAX_ROWS_LARGE = 500    # 품목 카탈로그(수만 코드)·실적 이력은 정당하게 더 클 수 있다
+
+
 class _Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -145,14 +153,13 @@ class ProfileUpsertRequest(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
 
-    # 배열별 최대 항목 수 — 요청 한 번으로 수만 건을 밀어넣는 남용을 막는다.
-    # 정상 회사 데이터를 넉넉히 덮되(실적 대장이 가장 많음) 위로 상한을 둔다.
     qualification: QualificationIn | None = None
-    regions: list[RegionIn] = Field(default_factory=list, max_length=30)
-    licenses: list[LicenseIn] = Field(default_factory=list, max_length=100)
-    items: list[ItemIn] = Field(default_factory=list, max_length=200)
-    certs: list[CertIn] = Field(default_factory=list, max_length=50)
-    personnel: list[PersonnelIn] = Field(default_factory=list, max_length=100)
-    capacity_evals: list[CapacityEvalIn] = Field(default_factory=list, max_length=100)
+    regions: list[RegionIn] = Field(default_factory=list, max_length=_MAX_ROWS)
+    licenses: list[LicenseIn] = Field(default_factory=list, max_length=_MAX_ROWS)
+    items: list[ItemIn] = Field(default_factory=list, max_length=_MAX_ROWS_LARGE)
+    certs: list[CertIn] = Field(default_factory=list, max_length=_MAX_ROWS)
+    personnel: list[PersonnelIn] = Field(default_factory=list, max_length=_MAX_ROWS)
+    capacity_evals: list[CapacityEvalIn] = Field(default_factory=list, max_length=_MAX_ROWS)
     performance_records: list[PerformanceRecordIn] = Field(
-        default_factory=list, max_length=500)
+        default_factory=list, max_length=_MAX_ROWS_LARGE
+    )
