@@ -24,6 +24,7 @@ from app.infra.db.session import Base
 #   반드시 여기도 함께 등록할 것.
 import app.infra.db.models.bid  # noqa: F401
 import app.infra.db.models.chat  # noqa: F401
+import app.infra.db.models.chat_usage  # noqa: F401
 import app.infra.db.models.company  # noqa: F401
 import app.infra.db.models.company_profile  # noqa: F401
 import app.infra.db.models.master  # noqa: F401

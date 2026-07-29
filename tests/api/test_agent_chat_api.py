@@ -12,11 +12,27 @@ from fastapi.testclient import TestClient
 from agents.schemas import AgentResponse, Citation, Filters, SessionContext
 
 from app.agents import chat_service as cs
+from app.agents.chat_rate_limit import guard as chat_guard
 from app.agents.chat_service import AgentChatService
-from app.api.deps import get_agent_chat_service, get_authenticated_user
+from app.api.deps import (
+    get_agent_chat_service,
+    get_authenticated_user,
+    get_chat_usage_repo,
+)
 from app.main import app
 
 _COMPANY = "9001"
+
+
+class FakeUsageRepo:
+    """일일 카운터 대역 — 실제 RDS를 안 건드린다. 호출마다 +1."""
+
+    def __init__(self):
+        self.count = 0
+
+    def incr_and_get(self, company_id):
+        self.count += 1
+        return self.count
 
 
 def make_ctx(summary: str = "턴1") -> SessionContext:
@@ -61,17 +77,20 @@ class FakeRunner:
 @pytest.fixture
 def client_with_runner():
     def _make(responses) -> tuple[TestClient, FakeRunner]:
+        chat_guard.reset()          # 프로세스 전역 레이트 가드 초기화(테스트 격리)
         runner = FakeRunner(responses)
         # 서비스는 '한 번만' 만든다 — 요청마다 새로 만들면 FakeChatRepo가 리셋돼
         # 세션 컨텍스트 왕복이 안 이어진다.
         service = AgentChatService(FakeChatRepo(), runner)
         app.dependency_overrides[get_agent_chat_service] = lambda: service
+        app.dependency_overrides[get_chat_usage_repo] = lambda: FakeUsageRepo()
         app.dependency_overrides[get_authenticated_user] = lambda: SimpleNamespace(
             company_id=_COMPANY, email=None)
         return TestClient(app), runner
 
     yield _make
     app.dependency_overrides.clear()
+    chat_guard.reset()
 
 
 def test_answer_turn_returns_session_id_and_maps_fields(client_with_runner):
@@ -173,3 +192,26 @@ def test_session_busy_maps_to_409(client_with_runner):
         assert r.status_code == 409
     finally:
         cs._inflight.discard("busy-1")
+
+
+def test_minute_rate_limit_maps_to_429(client_with_runner):
+    """★ 회사당 분당 상한(기본 10) 초과 → 429 + Retry-After(비용·부하 방어)."""
+    client, _ = client_with_runner([
+        AgentResponse(action="answer", answer="x", session_context=make_ctx())
+        for _ in range(12)])
+    for _ in range(10):                                    # 10회는 통과
+        assert client.post("/agent/chat", json={"query": "q"}).status_code == 200
+    r = client.post("/agent/chat", json={"query": "q"})    # 11회째 차단
+    assert r.status_code == 429
+    assert r.headers.get("Retry-After")
+
+
+def test_daily_rate_limit_maps_to_429(client_with_runner):
+    """★ 일일 상한(기본 500) 초과 → 429. usage가 상한 초과 값을 반환하는 상황."""
+    client, _ = client_with_runner([
+        AgentResponse(action="answer", answer="x", session_context=make_ctx())])
+    app.dependency_overrides[get_chat_usage_repo] = lambda: SimpleNamespace(
+        incr_and_get=lambda cid: 99999)                    # 하루 상한 초과 상태
+    r = client.post("/agent/chat", json={"query": "q"})
+    assert r.status_code == 429
+    assert "오늘" in r.json()["detail"]
