@@ -40,6 +40,9 @@ class FakeChatRepo:
             ctx = None
         return ctx
 
+    def count_turns(self, session_id, company_id):
+        return 0            # 캡 미도달 — API 계약 테스트는 소프트캡을 다루지 않는다
+
     def close_turn(self, session_id, resp):
         owner, _ = self.sessions[session_id]
         self.sessions[session_id] = (owner, resp.session_context)
@@ -127,6 +130,13 @@ def test_empty_query_is_422(client_with_runner):
     client, runner = client_with_runner([])
     assert client.post("/agent/chat", json={"query": ""}).status_code == 422
     assert runner.requests == []           # LLM까지 가지 않는다(비용 방어)
+
+
+def test_whitespace_only_query_is_422(client_with_runner):
+    """공백만("   ")도 422 — trim 후 비어 있으면 LLM에 안 보낸다(비용 방어)."""
+    client, runner = client_with_runner([])
+    assert client.post("/agent/chat", json={"query": "   "}).status_code == 422
+    assert runner.requests == []
 
 
 def test_too_long_query_is_422(client_with_runner):

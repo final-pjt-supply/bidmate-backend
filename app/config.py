@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     auth_disabled: bool = Field(default=False)
     dev_company_id: str = Field(default="")
 
+    # --- 챗 세션 길이 상한 ---
+    # 한 대화가 무한정 길어지는 것을 막는 소프트캡. 초과하면 LLM을 부르지 않고
+    # "새 대화를 시작하라"고 안내한다(문맥 비용·무한 사용 방지). 에이전트가 요약을
+    # 들고 다녀 토큰이 폭증하진 않으므로 하드 차단이 아닌 가드레일 성격.
+    session_max_turns: int = Field(default=20)
+
     @model_validator(mode="after")
     def _forbid_auth_disabled_in_production(self) -> "Settings":
         """운영 슬롯에서 인증 비활성화를 금지한다.
