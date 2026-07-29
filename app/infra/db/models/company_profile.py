@@ -69,11 +69,25 @@ class CompanyCert(Base):
 
 
 class CompanyPersonnel(Base):
-    """기술인력 — 자격·등급별 보유 인원 (1:N)."""
+    """기술인력 — 자격·등급·분야별 보유 인원 (1:N).
+
+    field_family(D-19): 공고가 인력을 (등급×분야×인원)으로 요구하는데 여기 데이터가
+    (등급×인원)뿐이면 1명이 여러 분야 슬롯을 동시 충족하는 과대매칭이 난다. 분야를
+    PK에 넣어 같은 자격을 분야별 다중 행(예: 중급기술자→토목 / 중급기술자→건축)으로
+    구분한다 — 안 넣으면 SQLAlchemy identity map이 (company_id, qual_code)로 뭉갠다.
+    NULL = 분야 무관(기존 데이터). DB는 유니크 인덱스(company_id, qual_code,
+    COALESCE(field_family,'_NONE'))라 NULL 행은 자격당 1행으로 유지된다.
+    """
     __tablename__ = "company_personnel"
 
     company_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     qual_code: Mapped[str] = mapped_column(String(20), primary_key=True)
+    # nullable PK 컬럼 — 매퍼 식별용이다(DB 실제 제약은 COALESCE 유니크 인덱스라
+    # 우리가 DDL을 내지 않는다). NULL 행은 자격당 하나뿐이라 identity 튜플 (…, None)이
+    # 유일해 안전하다. primary_key + nullable=True는 이런 레거시/외부소유 매핑용이다.
+    field_family: Mapped[str | None] = mapped_column(
+        String(12), primary_key=True, nullable=True
+    )
     qual_name: Mapped[str | None] = mapped_column(String(200))
     headcount: Mapped[int | None] = mapped_column(SmallInteger)
 
