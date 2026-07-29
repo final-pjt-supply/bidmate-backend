@@ -13,6 +13,8 @@ from functools import lru_cache
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.agents.chat_rate_limit import RateLimited
+from app.agents.chat_rate_limit import guard as _chat_guard
 from app.agents.chat_service import AgentChatService
 from app.config import get_settings
 from app.infra.auth.cognito import TokenError, verify_id_token
@@ -21,6 +23,10 @@ from app.infra.db.repositories.company_profile_repository import (
     CompanyProfileRepository,
 )
 from app.infra.db.repositories.chat_repository import ChatRepository
+from app.infra.db.repositories.chat_usage_repository import (
+    ChatUsageRepository,
+    seconds_to_kst_midnight,
+)
 from app.infra.db.repositories.company_repository import CompanyRepository
 from app.infra.db.repositories.master_repository import MasterRepository
 from app.infra.db.repositories.match_repository import MatchRepository
@@ -203,3 +209,48 @@ def get_agent_chat_service(db: Session = Depends(get_db)) -> AgentChatService:
 
 def get_chat_query_service(db: Session = Depends(get_db)) -> ChatQueryService:
     return ChatQueryService(ChatRepository(db))
+
+
+def get_chat_usage_repo(db: Session = Depends(get_db)) -> ChatUsageRepository:
+    return ChatUsageRepository(db)
+
+
+def _too_many(retry_after: int, detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=detail,
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+def enforce_chat_limits(
+    current_user: CurrentUser = Depends(get_authenticated_user),
+    usage: ChatUsageRepository = Depends(get_chat_usage_repo),
+) -> Iterator[None]:
+    """/agent/chat 레이트리밋 — 회사당 분당·동시성·일일(Bedrock 비용 방어).
+
+    순서: 분당(인메모리 슬라이딩) → 동시성 획득(인메모리) → 일일(RDS 원자 증가) →
+    처리 → 해제. 동시성 슬롯을 잡은 뒤엔 try/finally로 반드시 해제한다. 검증실패
+    (422 공백 등)는 이 의존성 실행 전 단계라 카운트 안 되고, 에이전트 실패(502)는
+    이미 카운트된 뒤라 포함된다(실패 턴도 비용을 유발했으므로).
+    """
+    settings = get_settings()
+    cid = int(current_user.company_id)
+    retry_msg = "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."
+    try:
+        _chat_guard.check_minute(cid, settings.rate_limit_per_min)
+    except RateLimited as exc:
+        raise _too_many(exc.retry_after, retry_msg)
+    try:
+        _chat_guard.acquire(cid, settings.chat_concurrency_max)
+    except RateLimited as exc:
+        raise _too_many(exc.retry_after, retry_msg)
+    try:
+        if usage.incr_and_get(cid) > settings.chat_daily_max:
+            raise _too_many(
+                seconds_to_kst_midnight(),
+                "오늘 사용 가능한 횟수를 초과했습니다. 내일 다시 시도해 주세요.",
+            )
+        yield
+    finally:
+        _chat_guard.release(cid)

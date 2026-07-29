@@ -80,6 +80,14 @@ class Settings(BaseSettings):
     # 들고 다녀 토큰이 폭증하진 않으므로 하드 차단이 아닌 가드레일 성격.
     session_max_turns: int = Field(default=20)
 
+    # --- 챗 레이트리밋(회사 company_id 기준, Bedrock 비용 방어) ---
+    # 분당·동시성은 인메모리(단일 프로세스라 정확). 일일은 지속 저장이 필요해 RDS.
+    # 다중 인스턴스/Lambda 전환 시 Redis로 이관. 검증실패(422)는 LLM 미도달이라 미포함,
+    # 에이전트 실패(502)는 LLM이 돌았으므로 포함.
+    rate_limit_per_min: int = Field(default=10)      # 회사당 분당 요청
+    chat_concurrency_max: int = Field(default=3)     # 회사당 동시 진행 요청
+    chat_daily_max: int = Field(default=500)         # 회사당 하루 요청
+
     @model_validator(mode="after")
     def _forbid_auth_disabled_in_production(self) -> "Settings":
         """운영 슬롯에서 인증 비활성화를 금지한다.
