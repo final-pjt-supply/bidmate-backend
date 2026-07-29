@@ -29,9 +29,29 @@ async def lifespan(app: FastAPI):
 
         sink = get_event_sink()
         sink.start()
+
+    # 매칭 주기 갱신(#80). 신규 공고를 match_results에 반영하는 주체가 여기뿐이라
+    # 끄면 회원이 프로필을 다시 저장할 때까지 새 공고가 추천에 안 나온다.
+    # 기본 off — 로컬/테스트가 운영 RDS에 배치를 돌리지 않게(실배포 .env에서 켠다).
+    refresher = None
+    if _settings.match_refresh_enabled:
+        import asyncio
+
+        from app.infra.db.session import SessionLocal
+        from app.services.match_refresh import match_refresh_loop
+
+        refresher = asyncio.create_task(
+            match_refresh_loop(
+                SessionLocal,
+                interval_sec=_settings.match_refresh_interval_sec,
+                full_hour=_settings.match_refresh_full_hour,
+            )
+        )
     try:
         yield
     finally:
+        if refresher is not None:
+            refresher.cancel()
         if sink is not None:
             sink.stop()
 
