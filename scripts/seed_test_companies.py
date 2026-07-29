@@ -199,7 +199,8 @@ def seed(conn) -> None:
 
             print(f"  {spec['name']} → company_id={cid}, 실적 {len(spec['records'])}건, 품목 {len(spec['items'])}건")
     conn.commit()
-    print("\n시딩 완료. 다음: python scripts/compute_matches.py --companies <id들>")
+    print("\n시딩 완료. 매칭은 compute_match_results(DB 함수) 재적재 또는 "
+          "프로필 저장 훅(PUT /me/profile)으로 계산된다.")
 
 
 def main():
