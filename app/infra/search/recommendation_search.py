@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Cloudflare 임베딩 + OpenSearch 제목 벡터 검색 어댑터."""
+import json
 from collections import OrderedDict
 from dataclasses import dataclass
 from threading import Lock
@@ -130,50 +131,88 @@ class RecommendationSearch:
             raise RecommendationSearchError("임베딩 API 응답 형식이 올바르지 않습니다.")
         return payload["result"]["data"]
 
-    def search_titles(
+    def search_titles_many(
         self,
-        vector: list[float],
+        vectors: list[list[float]],
         *,
         candidate_ids: list[str],
         limit: int,
-    ) -> list[TitleSearchHit]:
-        if not candidate_ids:
+    ) -> list[list[TitleSearchHit]]:
+        """벡터별 제목 kNN 결과를 입력 순서대로 반환한다.
+
+        관심 쿼리마다 _search를 따로 던지면 왕복이 쿼리 수만큼 직렬로 쌓인다
+        (상한 10개). _msearch로 묶으면 왕복이 한 번이다. 전송 바이트는 줄지 않는다 —
+        서브쿼리마다 후보 필터를 각자 실어야 하기 때문이다.
+        """
+        if not vectors:
             return []
+        if not candidate_ids:
+            return [[] for _ in vectors]
+
         search_size = min(len(candidate_ids), max(limit * 5, 50))
-        body = {
-            "size": search_size,
-            "query": {
-                "knn": {
-                    "vector": {
-                        "vector": vector,
-                        "k": search_size,
-                        "filter": {
-                            "bool": {
-                                "filter": [
-                                    {"terms": {"bid_id": candidate_ids}},
-                                    {"term": {"type": "title"}},
-                                ]
+        # 후보 필터는 모든 서브쿼리가 동일하다. 한 번만 만들어 재사용한다.
+        query_filter = {
+            "bool": {
+                "filter": [
+                    {"terms": {"bid_id": candidate_ids}},
+                    {"term": {"type": "title"}},
+                ]
+            }
+        }
+        lines: list[str] = []
+        for vector in vectors:
+            # 헤더 줄 — 인덱스를 URL에 적었으므로 비워 둔다.
+            lines.append("{}")
+            lines.append(
+                json.dumps(
+                    {
+                        "size": search_size,
+                        "query": {
+                            "knn": {
+                                "vector": {
+                                    "vector": vector,
+                                    "k": search_size,
+                                    "filter": query_filter,
+                                }
                             }
                         },
-                    }
-                }
-            },
-            "_source": ["bid_id"],
-        }
+                        "_source": ["bid_id"],
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        # NDJSON은 마지막 줄바꿈까지 있어야 한다. 빠지면 OpenSearch가 요청을 거부한다.
+        body = "\n".join(lines) + "\n"
+
         try:
             response = self._os_client.post(
-                f"{self._opensearch_url}/{self._index_name}/_search",
-                json=body,
+                f"{self._opensearch_url}/{self._index_name}/_msearch",
+                content=body.encode("utf-8"),
+                headers={"Content-Type": "application/x-ndjson"},
             )
             response.raise_for_status()
             payload = response.json()
         except (httpx.HTTPError, ValueError) as exc:
             raise RecommendationSearchError("추천 제목 검색에 실패했습니다.") from exc
+
+        responses = payload.get("responses")
+        # 개수가 어긋나면 결과를 엉뚱한 관심 쿼리에 붙이게 된다. 짝이 안 맞으면 멈춘다.
+        if not isinstance(responses, list) or len(responses) != len(vectors):
+            raise RecommendationSearchError("추천 제목 검색 응답이 요청과 맞지 않습니다.")
+        return [self._parse_hits(item) for item in responses]
+
+    @staticmethod
+    def _parse_hits(item: object) -> list[TitleSearchHit]:
+        # _msearch는 서브검색 하나가 실패해도 전체 HTTP는 200이고 그 항목에만 error가
+        # 들어온다. 여기서 걸러내지 않으면 실패를 '결과 0건'으로 착각해, 추천이 조용히
+        # 비거나 순위가 뒤틀린 채로 나간다. 기존 _search와 같이 실패는 실패로 올린다.
+        if not isinstance(item, dict) or "error" in item:
+            raise RecommendationSearchError("추천 제목 검색에 실패했습니다.")
         return [
             TitleSearchHit(
                 bid_id=hit["_source"]["bid_id"],
                 score=float(hit["_score"]),
             )
-            for hit in payload.get("hits", {}).get("hits", [])
+            for hit in item.get("hits", {}).get("hits", [])
             if hit.get("_source", {}).get("bid_id")
         ]

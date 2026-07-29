@@ -43,12 +43,15 @@ class RecommendationService:
         # bid_id는 OpenSearch/RDS 간 불투명 공통키다. 같은 ID가 중복되면 첫 행만 쓴다.
         candidates = {bid.bid_id: (match, bid) for match, bid in rows}
         best: dict[str, tuple[float, str]] = {}
-        for query, vector in zip(queries, self._search.embed(queries)):
-            hits = self._search.search_titles(
-                vector,
-                candidate_ids=list(candidates),
-                limit=limit,
-            )
+        # 관심 쿼리별 검색을 _msearch로 한 번에 보낸다. 쿼리마다 왕복하면 최대 10번의
+        # 대기가 직렬로 쌓인다. 결과는 보낸 순서대로 돌아오므로 queries와 zip한다.
+        vectors = self._search.embed(queries)
+        hits_by_query = self._search.search_titles_many(
+            vectors,
+            candidate_ids=list(candidates),
+            limit=limit,
+        )
+        for query, hits in zip(queries, hits_by_query):
             for hit in hits:
                 if hit.bid_id not in candidates:
                     # 검색 filter 방어선. 외부 검색 응답을 신뢰해 자격 밖 공고를 섞지 않는다.
