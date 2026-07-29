@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import get_authenticated_user, get_match_service
 from app.main import app
-from app.services.match_service import MatchService, PAGE_SIZE
+from app.services.match_service import MatchService
 
 COMPANY_WITH_DATA = 9001
 
@@ -87,7 +87,7 @@ def test_matches_full_contract(match_client):
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {"total", "page", "page_size", "items"}
-    assert body["total"] == 1 and body["page_size"] == PAGE_SIZE   # '불가'는 기본 제외
+    assert body["total"] == 1 and body["page_size"] == 24   # '불가'는 기본 제외
     first = body["items"][0]
     # 중첩 구조: bid + match
     assert set(first) == {"bid", "match"}

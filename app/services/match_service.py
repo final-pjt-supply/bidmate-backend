@@ -16,7 +16,7 @@ from app.api.v1.schemas.match import (
 from app.domain.enums import SearchSortKey
 from app.infra.db.repositories.match_repository import MatchRepository
 
-PAGE_SIZE = 20   # /bids 목록과 동일 계약
+PAGE_SIZE = 24   # 프론트 3열 그리드를 빈 칸 없이 채우는 맞춤추천 계약
 _KST = timezone(timedelta(hours=9))   # DB는 KST naive
 
 
