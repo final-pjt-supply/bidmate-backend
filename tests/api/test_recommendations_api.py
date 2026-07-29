@@ -66,13 +66,16 @@ class FakeRecommendationSearch:
     def embed(self, texts):
         return [[0.1, 0.2] for _ in texts]
 
-    def search_titles(self, vector, *, candidate_ids, limit):
+    def search_titles_many(self, vectors, *, candidate_ids, limit):
         self.candidate_ids = candidate_ids
         # rogue_bid는 검색 시스템이 잘못 돌려줘도 자격 후보 밖이므로 서비스가 버려야 한다.
         return [
-            TitleSearchHit("bid_b", 0.81),
-            TitleSearchHit("rogue_bid", 0.99),
-            TitleSearchHit("bid_a", 0.72),
+            [
+                TitleSearchHit("bid_b", 0.81),
+                TitleSearchHit("rogue_bid", 0.99),
+                TitleSearchHit("bid_a", 0.72),
+            ]
+            for _ in vectors
         ]
 
 
@@ -118,11 +121,14 @@ def test_duplicate_titles_are_collapsed():
     )
 
     class DuplicateSearch(FakeRecommendationSearch):
-        def search_titles(self, vector, *, candidate_ids, limit):
+        def search_titles_many(self, vectors, *, candidate_ids, limit):
             return [
-                TitleSearchHit("bid_c", 0.91),
-                TitleSearchHit("bid_b", 0.90),
-                TitleSearchHit("bid_a", 0.80),
+                [
+                    TitleSearchHit("bid_c", 0.91),
+                    TitleSearchHit("bid_b", 0.90),
+                    TitleSearchHit("bid_a", 0.80),
+                ]
+                for _ in vectors
             ]
 
     result = RecommendationService(repo, DuplicateSearch()).recommend(company_id=1, limit=3)

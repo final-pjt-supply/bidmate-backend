@@ -8,6 +8,7 @@
 """
 from collections.abc import Iterator
 from dataclasses import dataclass
+from functools import lru_cache
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -151,11 +152,17 @@ def get_match_service(db: Session = Depends(get_db)) -> MatchService:
     return MatchService(MatchRepository(db))
 
 
-def get_recommendation_service(
-    db: Session = Depends(get_db),
-) -> RecommendationService:
+@lru_cache(maxsize=1)
+def get_recommendation_search() -> RecommendationSearch:
+    """검색 어댑터는 프로세스당 하나만 만든다.
+
+    요청마다 새로 만들면 안에 든 httpx 커넥션 풀과 임베딩 캐시가 매번 버려져,
+    커넥션 재사용도 캐시 적중도 일어나지 않는다. 설정(get_settings)이 이미
+    프로세스 수명 캐시라 어댑터도 같은 수명으로 둔다. 상태는 커넥션·캐시뿐이고
+    회사별 데이터를 담지 않으므로 요청 간 공유해도 격리가 깨지지 않는다.
+    """
     settings = get_settings()
-    search = RecommendationSearch(
+    return RecommendationSearch(
         opensearch_url=settings.opensearch_url,
         opensearch_user=settings.opensearch_user,
         opensearch_password=settings.opensearch_password,
@@ -165,7 +172,14 @@ def get_recommendation_service(
         cf_api_token=settings.cf_api_token,
         cf_model=settings.cf_embedding_model,
     )
-    return RecommendationService(RecommendationRepository(db), search)
+
+
+def get_recommendation_service(
+    db: Session = Depends(get_db),
+) -> RecommendationService:
+    return RecommendationService(
+        RecommendationRepository(db), get_recommendation_search()
+    )
 
 
 def get_master_service(db: Session = Depends(get_db)) -> MasterService:
