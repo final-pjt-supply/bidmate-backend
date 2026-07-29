@@ -34,6 +34,12 @@ async def lifespan(app: FastAPI):
     finally:
         if sink is not None:
             sink.stop()
+        # 추천 검색 어댑터가 들고 있는 httpx 커넥션 풀 정리. 한 번도 안 쓰였으면
+        # 어댑터를 만들지 않는다(lru_cache에 값이 없으면 새로 만들 필요가 없다).
+        from app.api.deps import get_recommendation_search
+
+        if get_recommendation_search.cache_info().currsize:
+            get_recommendation_search().close()
 
 
 app = FastAPI(title="BidMate API", version="0.1.0", lifespan=lifespan)
