@@ -325,7 +325,11 @@ if [[ -n "${old_container}" ]]; then
 fi
 
 trap - ERR
-docker image prune --force >/dev/null
+# --all: SHA로 태그된 옛 배포 이미지까지 정리한다. dangling(--force만)으로는 태그된
+# 미사용 이미지가 안 지워져 매 배포마다 쌓여 8.7GB 디스크가 결국 가득 찬다(no space
+# left on device로 배포 실패). 실행 중 컨테이너(활성 슬롯·드레인 후 정지된 이전 슬롯)가
+# 참조하는 이미지는 보존되고, 그 외 미사용만 제거된다. 롤백은 ECR 재풀로 가능.
+docker image prune --all --force >/dev/null
 docker logout "${registry}" >/dev/null 2>&1 || true
 
 echo "Deployment succeeded: ${candidate_slot} serves ${version}."
