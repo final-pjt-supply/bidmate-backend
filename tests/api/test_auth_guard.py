@@ -91,10 +91,48 @@ def test_auth_disabled_allowed_in_dev(slot):
     assert settings.auth_disabled is True
 
 
-def test_auth_enabled_is_fine_in_production():
-    """인증이 켜져 있으면 운영 슬롯이어도 문제없다(가드는 auth_disabled에만 반응)."""
-    settings = Settings(auth_disabled=False, deployment_slot="blue")
-    assert settings.deployment_slot == "blue"
+# 운영 슬롯이 정상 기동하려면 Cognito 설정 + 실제 CORS 오리진이 모두 필요하다.
+_PROD_OK = dict(
+    auth_disabled=False,
+    deployment_slot="blue",
+    cognito_user_pool_id="pool-1",
+    cognito_client_id="cid-1",
+    cors_origins="https://bidmate.example.com",
+)
+
+
+def test_full_production_config_is_fine():
+    """인증·Cognito·CORS가 모두 갖춰지면 운영 슬롯이어도 정상 기동한다."""
+    settings = Settings(**_PROD_OK)
+    assert settings.is_production_slot is True
+    assert settings.auth_configured is True
+
+
+@pytest.mark.parametrize("slot", ["blue", "green", "prod", "PRODUCTION"])
+def test_cognito_unconfigured_blocks_startup_in_production(slot):
+    """운영 슬롯인데 Cognito 미설정이면 기동 실패(로그인 503을 스모크가 못 잡는 갭 방어, QA M1)."""
+    with pytest.raises(ValidationError):
+        Settings(**{**_PROD_OK, "deployment_slot": slot,
+                    "cognito_user_pool_id": "", "cognito_client_id": ""})
+
+
+@pytest.mark.parametrize("cors", [
+    "http://localhost:5173,http://localhost:3000",   # 기본값 그대로
+    "http://127.0.0.1:3000",
+    "",                                              # 비어 있음
+])
+def test_localhost_only_cors_blocks_startup_in_production(cors):
+    """운영 슬롯인데 CORS가 localhost뿐이면 기동 실패(프론트 브라우저 호출 전면 차단 방어, QA M2)."""
+    with pytest.raises(ValidationError):
+        Settings(**{**_PROD_OK, "cors_origins": cors})
+
+
+@pytest.mark.parametrize("slot", ["local", "dev"])
+def test_dev_slot_skips_production_guards(slot):
+    """local/dev 슬롯은 Cognito·CORS 미설정이어도 기동한다(개발 편의)."""
+    settings = Settings(deployment_slot=slot, cognito_user_pool_id="",
+                        cognito_client_id="", cors_origins="http://localhost:5173")
+    assert settings.is_production_slot is False
 
 
 # ── 인증 실패 응답에 내부 상세가 새지 않는다 (#92) ──────────────────
