@@ -89,19 +89,44 @@ class Settings(BaseSettings):
     chat_daily_max: int = Field(default=500)         # 회사당 하루 요청
 
     @model_validator(mode="after")
-    def _forbid_auth_disabled_in_production(self) -> "Settings":
-        """운영 슬롯에서 인증 비활성화를 금지한다.
+    def _validate_production_config(self) -> "Settings":
+        """운영 슬롯에서 '조용히 깨진 채' 뜨는 설정을 기동 시점에 막는다(fail-fast).
 
-        설정을 읽는 시점(get_settings)에 돌아, 조건이 나쁘면 여기서 예외가 나 서버가
-        기동조차 못 한다. 운영 .env에 AUTH_DISABLED=true가 실수로 들어가도 조용히
-        무인증으로 열리지 않고 배포가 즉시 실패한다.
+        설정을 읽는 시점(get_settings)에 돌아, 조건이 나쁘면 예외가 나 서버가 기동조차
+        못 한다 → Blue/Green 배포에서 새 슬롯이 헬스체크에 실패해 자동 롤백된다. 스모크
+        (무토큰 401)로는 안 잡히는 미스컨피그(무인증 개방·로그인 503·CORS 전면 차단)를
+        조용히 트래픽에 노출하지 않고 배포가 시끄럽게 실패하게 한다.
         """
-        if self.auth_disabled and self.deployment_slot.lower() not in _AUTH_OPTIONAL_SLOTS:
+        if not self.is_production_slot:
+            return self
+
+        # ① 인증을 끈 채 운영에 뜨는 것 금지(조용한 무인증 개방 방지).
+        if self.auth_disabled:
             raise ValueError(
                 f"AUTH_DISABLED=true는 {sorted(_AUTH_OPTIONAL_SLOTS)} 슬롯에서만 허용된다 "
                 f"(현재 deployment_slot={self.deployment_slot!r}). 운영에서는 인증을 끌 수 없다."
             )
+        # ② Cognito 미설정이면 로그인 토큰이 503으로 죽는데 무토큰 401 스모크는 통과해
+        #    깨진 배포가 트래픽을 받는다 — 부팅부터 막는다(QA M1).
+        if not self.auth_configured:
+            raise ValueError(
+                "운영 슬롯은 COGNITO_USER_POOL_ID·COGNITO_CLIENT_ID가 필요하다 "
+                f"(deployment_slot={self.deployment_slot!r}). 인증 미설정으론 기동하지 않는다."
+            )
+        # ③ CORS가 localhost뿐이면 프론트 브라우저 호출이 전부 막힌다 — 실 오리진 강제(QA M2).
+        if not self._has_non_localhost_cors():
+            raise ValueError(
+                "운영 슬롯은 CORS_ORIGINS에 실제 프론트 오리진이 필요하다 "
+                f"(현재={self.cors_origins!r}). localhost만으로는 브라우저 호출이 막힌다."
+            )
         return self
+
+    def _has_non_localhost_cors(self) -> bool:
+        """localhost/127.0.0.1이 아닌 실제 오리진이 하나라도 있는가."""
+        return any(
+            not (o.startswith("http://localhost") or o.startswith("http://127.0.0.1"))
+            for o in self.cors_origins_list
+        )
 
     # --- 매칭 주기 갱신(#80) ---
     # 신규 공고를 match_results에 반영하는 내장 스케줄러. 기본 off — 로컬/테스트가
@@ -149,6 +174,11 @@ class Settings(BaseSettings):
     def cognito_jwks_url(self) -> str:
         """서명 검증용 공개키 목록(JWKS). PyJWKClient가 캐싱한다."""
         return f"{self.cognito_issuer}/.well-known/jwks.json"
+
+    @property
+    def is_production_slot(self) -> bool:
+        """운영 슬롯인가(local/dev가 아닌 모든 슬롯). 인증·CORS 기동 가드의 기준."""
+        return self.deployment_slot.lower() not in _AUTH_OPTIONAL_SLOTS
 
     @property
     def auth_configured(self) -> bool:
