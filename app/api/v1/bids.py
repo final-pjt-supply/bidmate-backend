@@ -26,6 +26,10 @@ def list_bids(
     service: BidService = Depends(get_bid_service),
     current_user: CurrentUser = Depends(get_current_user),   # ★ 인증/회사별정렬 진입점
 ) -> BidListResponse:
+    """공고 목록 — 마감 전 + 자격추출 완료(merged) 공고만.
+
+    업무구분(category) 필터·정렬(마감임박/최신)·페이지네이션. 비로그인도 조회 가능.
+    """
     return service.list_bids(
         category=category,
         sort=sort,
@@ -74,6 +78,10 @@ def get_bid(
     service: BidService = Depends(get_bid_service),
     current_user: CurrentUser = Depends(get_current_user),   # ★ 인증/회사별정렬 진입점
 ) -> BidDetail:
+    """공고 상세 + 자격요건 15필드. 로그인 시 내 회사 매칭 판정도 함께 내려준다.
+
+    없거나 미노출(비-merged) 공고는 존재 여부를 흘리지 않도록 모두 404로 통일.
+    """
     try:
         return service.get_bid(bid_id, company_id=current_user.company_id)
     except BidNotFoundError:
