@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Alembic 마이그레이션 환경 — BidMate API 서버 전용.
+"""Alembic 마이그레이션 환경 — BidFriend API 서버 전용.
 
 핵심 규약(alembic/README.md 참조):
 - 관리 대상 = 이 레포가 모델로 매핑한 테이블뿐(Base.metadata에 등록된 것).

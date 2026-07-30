@@ -1,4 +1,4 @@
-# BidMate API 서버 전용 의존성.
+# BidFriend API 서버 전용 의존성.
 # 파이프라인 Lambda(ingestion/parsing/pipeline)와 분리 — 그쪽은 루트 requirement.txt를 쓴다.
 # API 서버는 Lambda + Mangum로 별도 배포되므로 fastapi/sqlalchemy를 파이프라인 이미지에
 # 섞지 않는다.

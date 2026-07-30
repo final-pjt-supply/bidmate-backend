@@ -1,6 +1,6 @@
 # Backend Nginx Blue/Green CI/CD
 
-BidMate 백엔드는 PR에서 검증한 뒤 `main`에 머지된 Git commit SHA 이미지를 ECR에
+BidFriend 백엔드는 PR에서 검증한 뒤 `main`에 머지된 Git commit SHA 이미지를 ECR에
 보관하고, SSM으로 프라이빗 EC2의 비활성 슬롯에 배포한다.
 
 ```text

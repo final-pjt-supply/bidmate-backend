@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
             get_recommendation_search().close()
 
 
-app = FastAPI(title="BidMate API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="BidFriend API", version="0.1.0", lifespan=lifespan)
 
 # 프론트(브라우저)가 다른 오리진에서 호출하므로 CORS 허용이 필수다. 없으면 서버가
 # 정상 응답해도 브라우저가 막는다. 허용 오리진은 설정(cors_origins, .env로 주입)에서

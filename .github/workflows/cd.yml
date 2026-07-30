@@ -181,7 +181,7 @@ jobs:
             aws ssm send-command \
               --instance-ids "${EC2_INSTANCE_ID}" \
               --document-name "AWS-RunShellScript" \
-              --comment "BidMate Blue/Green ${DEPLOY_SHA}" \
+              --comment "BidFriend Blue/Green ${DEPLOY_SHA}" \
               --parameters "${parameters}" \
               --query "Command.CommandId" \
               --output text
