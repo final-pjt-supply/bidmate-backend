@@ -103,13 +103,27 @@ sudo docker ps --filter label=com.bidmate.service=api
 | `GET /me` | 현재 로그인 회사 정보 |
 | `DELETE /me` | 회원 탈퇴(소프트 삭제) |
 | `GET /me/profile` | 회사 자격요건 프로필 8섹션 조회 |
+| `PUT /me/profile` | 프로필 전체 저장(full replace) — 저장 성공 시 그 회사 매칭 재계산 |
 | `GET·POST·DELETE /me/scraps` | 공고 스크랩(목록/담기/빼기) |
 | `GET /me/matches` | 회사별 공고 매칭 결과 (verdict·근거, sort=deadline·recent) |
+| `GET /me/matches/summary` | 매칭 가능 공고 건수(홈 대시보드) |
+| `GET /me/recommendations` | 회사별 개인화 추천 |
+
+인력 섹션은 자격·등급에 더해 **분야(`field_family`, D-19)** 를 받는다 — 공고가
+(등급×분야×인원)으로 요구하므로 같은 자격도 분야별로 여러 행이 될 수 있다.
+
+### 챗봇 세션 🔒
+| 메서드 · 경로 | 설명 |
+|---|---|
+| `GET /me/sessions` | 내 대화 목록(최근순) |
+| `GET /me/sessions/{id}` | 대화 상세(메시지 전체) |
+| `DELETE /me/sessions/{id}` | 대화 삭제(소프트) |
+| `DELETE /me/sessions/{id}/last-turn` | 마지막 턴 취소 |
 
 ### 에이전트 · 이벤트 · 기타
 | 메서드 · 경로 | 설명 |
 |---|---|
-| `POST /agent/chat` | 대화 에이전트 (RAG, Bedrock) |
+| `POST /agent/chat` | 대화 에이전트 (RAG, Bedrock). 회사당 레이트리밋(분당·동시성·일일) 적용 |
 | `POST /events` | 고객 여정 이벤트 수집 (S3 NDJSON 적재) |
 | `GET /health` | 헬스체크 |
 | `GET /docs` | Swagger 문서 |
@@ -150,7 +164,8 @@ Nginx 전환·스모크 테스트·자동 롤백은 [deploy/CD.md](deploy/CD.md)
 
 - **외부 소유 테이블**: `bid_table`·`bid_attachments`(파이프라인), 회사 프로필 8테이블은
   이 서버가 **읽기 매핑**만 한다. 스키마 변경(DDL)은 소유 측 + 팀 협의로만.
-- `companies`·`company_bid_scraps`·`chat_sessions`·`chat_messages`는 API가 쓰기.
+- `companies`·`company_bid_scraps`·`chat_sessions`·`chat_messages`·`chat_daily_usage`는
+  API가 쓰기(Alembic 관리). 회사 프로필 8테이블은 외부 소유라 **읽기/쓰기(DML)는 하되 DDL은 안 냄**.
 - `match_results`는 **스키마는 외부 소유(DDL 금지)지만 적재는 API가 한다** — 자격 저장
   훅(#75)과 주기 갱신 스케줄러(#80)가 DB 함수 `compute_match_results()` 결과로 채운다.
   계산 로직은 그 DB 함수에 있고 이 리포에 없다.
