@@ -17,20 +17,22 @@ router = APIRouter(prefix="/me/matches", tags=["matches"])
 @router.get("", response_model=MatchListResponse)
 def list_matches(
     sort: MatchSortKey = Query(
-        default=MatchSortKey.DEADLINE,
-        description="deadline(마감임박, 기본)/recent(최신)/recommended(추천순=자격 충족 비율)",
+        default=MatchSortKey.RECOMMENDED,
+        description="recommended(추천순=자격 충족 비율, 기본)/deadline(마감임박)/recent(최신)",
     ),
     page: int = Query(default=1, ge=1, description="1-based. 범위 밖이면 빈 배열."),
     include_infeasible: bool = Query(
-        default=False, description="참가 불가 공고 포함 여부. 기본은 제외."
+        default=False,
+        description="기본은 '가능'·'보완가능'만. true면 확인필요·불가·판정없음도 포함.",
     ),
     service: MatchService = Depends(get_match_service),
     current_user: CurrentUser = Depends(get_authenticated_user),
 ) -> MatchListResponse:
     """내 공고 매칭 목록 — merged·마감전만, 사전계산 verdict/근거 포함.
 
-    기본적으로 '불가'는 뺀다 — 실측상 판정의 65%가 불가라, 넣으면 추천 목록이
-    참가할 수 없는 공고로 채워진다. 전체가 필요하면 include_infeasible=true.
+    기본 정렬은 추천순(자격 충족 비율 높은 순). 기본 노출은 참가 가치가 있는
+    '가능'·'보완가능'만 — 확인필요(공고측 데이터 미해석)·불가·판정없음은 뺀다. 전체가
+    필요하면 include_infeasible=true.
     """
     return service.list_matches(
         company_id=int(current_user.company_id),

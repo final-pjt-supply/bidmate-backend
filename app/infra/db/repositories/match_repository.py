@@ -16,7 +16,9 @@ from app.infra.db.models.bid import Bid
 from app.infra.db.models.match_result import MatchResult
 
 _MERGED = QualStatus.MERGED.value
-_INFEASIBLE = "불가"
+# 참가 가치가 있는(참여 가능/보완하면 가능한) 판정만 기본 노출한다. '확인필요'(공고측
+# 데이터 미해석)·'불가'·판정없음(NULL)은 기본 제외 — include_infeasible=true면 전체.
+_ACTIONABLE = ("가능", "보완가능")
 
 # match_results ⋈ bid_table 조인 조건 — count/list_page가 공유한다.
 # (따로 쓰면 한쪽만 고쳐져 total과 목록이 어긋난다.)
@@ -40,10 +42,8 @@ class MatchRepository:
             or_(Bid.bid_clse_dt >= clse_after, Bid.bid_clse_dt.is_(None)),
         )
         if not include_infeasible:
-            # verdict NULL(판정 없음)은 남긴다 — 불가라고 단정할 근거가 없다.
-            stmt = stmt.where(
-                or_(MatchResult.verdict != _INFEASIBLE, MatchResult.verdict.is_(None))
-            )
+            # '가능'·'보완가능'만 — 확인필요·불가·판정없음(NULL)은 in_()이 자연히 뺀다.
+            stmt = stmt.where(MatchResult.verdict.in_(_ACTIONABLE))
         return stmt
 
     def get_one(

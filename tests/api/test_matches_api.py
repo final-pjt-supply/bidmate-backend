@@ -38,7 +38,13 @@ def _match(verdict: str):
 def _rows_for(company_id: int):
     if company_id != COMPANY_WITH_DATA:
         return []
-    return [(_match("가능"), _bid("bid_a")), (_match("불가"), _bid("bid_b"))]
+    # 4종 판정 — 기본 노출은 '가능'·'보완가능'만, 나머지 2종은 include로만.
+    return [
+        (_match("가능"), _bid("bid_a")),
+        (_match("보완가능"), _bid("bid_b")),
+        (_match("확인필요"), _bid("bid_c")),
+        (_match("불가"), _bid("bid_d")),
+    ]
 
 
 class FakeMatchRepo:
@@ -50,7 +56,8 @@ class FakeMatchRepo:
         rows = _rows_for(company_id)
         if include_infeasible:
             return rows
-        return [r for r in rows if r[0].verdict != "불가"]
+        # 기본 노출 = '가능'·'보완가능'만(확인필요·불가 제외) — repository와 동일 규칙.
+        return [r for r in rows if r[0].verdict in ("가능", "보완가능")]
 
     def count(self, company_id: int, *, clse_after, include_infeasible=False) -> int:
         self.last_include = include_infeasible
@@ -87,7 +94,7 @@ def test_matches_full_contract(match_client):
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {"total", "page", "page_size", "items"}
-    assert body["total"] == 1 and body["page_size"] == 24   # '불가'는 기본 제외
+    assert body["total"] == 2 and body["page_size"] == 24   # 가능·보완가능만(확인필요·불가 제외)
     first = body["items"][0]
     # 중첩 구조: bid + match
     assert set(first) == {"bid", "match"}
@@ -96,10 +103,10 @@ def test_matches_full_contract(match_client):
     assert first["match"]["axes"][0]["axis"] == "direct_prod"
 
 
-def test_default_sort_is_deadline(match_client):
+def test_default_sort_is_recommended(match_client):
     make, repo = match_client
     make().get("/me/matches")
-    assert repo.last_sort == "deadline"   # 기본 정렬
+    assert repo.last_sort == "recommended"   # 기본 정렬 = 추천순
 
 
 def test_recent_sort_passed_through(match_client):
@@ -131,7 +138,8 @@ def test_empty_for_company_without_matches(match_client):
 def test_out_of_range_page_is_empty(match_client):
     make, _ = match_client
     body = make().get("/me/matches?page=99").json()
-    assert body["total"] == 1 and body["items"] == []
+    # 기본 노출 = 가능·보완가능 2건. 범위 밖 페이지는 total 유지 + 빈 목록.
+    assert body["total"] == 2 and body["items"] == []
 
 
 def test_matches_require_login(match_client):
@@ -141,21 +149,23 @@ def test_matches_require_login(match_client):
     assert TestClient(app).get("/me/matches").status_code == 401
 
 
-# ── 참가 불가 제외 (이슈 #59) ─────────────────────────────────────────
-def test_infeasible_excluded_by_default(match_client):
-    """실측상 판정의 65%가 '불가' — 기본으로 빼지 않으면 추천 목록이 불가로 채워진다."""
+# ── 기본 노출 = 가능·보완가능만 (이슈 #59, #111) ─────────────────────
+def test_only_actionable_verdicts_by_default(match_client):
+    """기본 목록은 참가 가치가 있는 '가능'·'보완가능'만 — 확인필요·불가는 뺀다."""
     make, repo = match_client
     body = make().get("/me/matches").json()
     assert repo.last_include is False
-    assert [i["match"]["verdict"] for i in body["items"]] == ["가능"]
+    assert {i["match"]["verdict"] for i in body["items"]} == {"가능", "보완가능"}
+    assert body["total"] == 2
 
 
-def test_infeasible_included_when_asked(match_client):
+def test_all_verdicts_included_when_asked(match_client):
+    """include_infeasible=true면 확인필요·불가·판정없음까지 전체 노출."""
     make, repo = match_client
     body = make().get("/me/matches?include_infeasible=true").json()
     assert repo.last_include is True
-    assert body["total"] == 2
-    assert {i["match"]["verdict"] for i in body["items"]} == {"가능", "불가"}
+    assert body["total"] == 4
+    assert {i["match"]["verdict"] for i in body["items"]} == {"가능", "보완가능", "확인필요", "불가"}
 
 
 def test_total_matches_filtered_list(match_client):
@@ -172,7 +182,7 @@ def test_summary_contract(match_client):
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {"total"}
-    assert body["total"] == 1   # '불가' 제외
+    assert body["total"] == 2   # 가능·보완가능만(확인필요·불가 제외)
 
 
 def test_summary_matches_list_total(match_client):
