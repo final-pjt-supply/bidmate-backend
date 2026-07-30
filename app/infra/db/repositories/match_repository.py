@@ -79,14 +79,24 @@ class MatchRepository:
         """한 페이지의 (매칭, 공고) 쌍.
 
         마감 전만 노출하므로 정렬은 단순하다(활성/마감 버킷 불필요):
-          * deadline: 마감 임박순 bid_clse_dt ASC + NULLS LAST
-          * recent  : 최신 등록순 bid_ntce_dt DESC + NULLS LAST
-        페이지 경계에서 행이 중복·누락되지 않게 bid_id로 tie-break.
+          * deadline   : 마감 임박순 bid_clse_dt ASC + NULLS LAST
+          * recent     : 최신 등록순 bid_ntce_dt DESC + NULLS LAST
+          * recommended: 자격 충족 비율(satisfied/required) DESC — 많이 충족한 공고부터.
+                         required=0(확인필요)은 비율이 없어 NULLS LAST로 맨 뒤.
+        페이지 경계에서 행이 중복·누락되지 않게 마감임박+bid_id로 tie-break.
         """
         stmt = select(MatchResult, Bid).join(Bid, _JOIN_ON)
         stmt = self._apply_filters(stmt, company_id, clse_after, include_infeasible)
         if sort == "recent":
             order = (Bid.bid_ntce_dt.desc().nulls_last(), Bid.bid_id.asc())
+        elif sort == "recommended":
+            # required=0이면 0으로 나누게 되므로 NULLIF로 NULL 처리(→ NULLS LAST).
+            ratio = MatchResult.satisfied * 1.0 / func.nullif(MatchResult.required, 0)
+            order = (
+                ratio.desc().nulls_last(),
+                Bid.bid_clse_dt.asc().nulls_last(),   # 동률이면 마감 임박 우선
+                Bid.bid_id.asc(),
+            )
         else:
             order = (Bid.bid_clse_dt.asc().nulls_last(), Bid.bid_id.asc())
         stmt = stmt.order_by(*order).limit(limit).offset(offset)

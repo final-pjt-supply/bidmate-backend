@@ -108,6 +108,15 @@ def test_recent_sort_passed_through(match_client):
     assert repo.last_sort == "recent"
 
 
+def test_recommended_sort_passed_through(match_client):
+    """추천순(자격 충족 비율) 정렬키가 422 없이 repository까지 전달된다.
+    실제 비율 정렬 SQL은 DB 통합/스모크로 검증(단위는 전달만 확인)."""
+    make, repo = match_client
+    r = make().get("/me/matches?sort=recommended")
+    assert r.status_code == 200
+    assert repo.last_sort == "recommended"
+
+
 def test_invalid_sort_is_422(match_client):
     make, _ = match_client
     assert make().get("/me/matches?sort=bogus").status_code == 422
