@@ -19,4 +19,4 @@ pytest
 # 패키지명 bidmate-agents, import명 agents — app.agents(연결 코드)와 충돌하지 않는다.
 # 로컬 개발은 pip install -e ../Final_Main_Agent(editable)로 대체, 배포는 태그/해시 고정 권장.
 langgraph
-bidmate-agents @ git+https://github.com/final-pjt-supply/bidmate-ai-agent.git@589c6ecfcb01a88e69af768f5f3b64f3e8c3f90e
+bidmate-agents @ git+https://github.com/final-pjt-supply/bidmate-ai-agent.git@92472fb542f80e26db6a906677abd4af2693fd02
