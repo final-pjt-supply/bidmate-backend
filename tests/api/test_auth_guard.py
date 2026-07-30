@@ -32,14 +32,17 @@ class _FakeCompanyRepo:
     """get_or_create가 실제로 받은 email을 붙잡아 두는 대역."""
 
     last_email = "SENTINEL"
+    withdrawn = False               # is_withdrawn_sub 반환값(테스트가 켠다)
+    get_or_create_called = False    # 탈퇴 차단 시 호출되지 않아야 함을 검증
 
     def __init__(self, db):
         pass
 
     def is_withdrawn_sub(self, sub):
-        return False
+        return _FakeCompanyRepo.withdrawn
 
     def get_or_create(self, *, cognito_sub, email, name):
+        _FakeCompanyRepo.get_or_create_called = True
         _FakeCompanyRepo.last_email = email
         return SimpleNamespace(id=1, email=email)
 
@@ -49,7 +52,7 @@ class _FakeRequest:
         self.headers = {"Authorization": f"Bearer {token}"}
 
 
-def _patch(monkeypatch, *, email_verified: bool):
+def _patch(monkeypatch, *, email_verified: bool, withdrawn: bool = False):
     monkeypatch.setattr(deps, "CompanyRepository", _FakeCompanyRepo)
     monkeypatch.setattr(
         deps,
@@ -59,6 +62,8 @@ def _patch(monkeypatch, *, email_verified: bool):
         ),
     )
     _FakeCompanyRepo.last_email = "SENTINEL"
+    _FakeCompanyRepo.withdrawn = withdrawn
+    _FakeCompanyRepo.get_or_create_called = False
 
 
 def test_unverified_email_is_not_passed_to_company_link(monkeypatch):
@@ -74,6 +79,19 @@ def test_verified_email_is_passed_through(monkeypatch):
     _patch(monkeypatch, email_verified=True)
     deps.get_current_user(_FakeRequest("tok"), db=None)
     assert _FakeCompanyRepo.last_email == "victim@corp.com"
+
+
+def test_withdrawn_account_token_is_401_and_not_resurrected(monkeypatch):
+    """★ 탈퇴 계정의 살아있는 토큰은 401로 막고, JIT 생성으로 회사를 되살리지 않는다.
+
+    막지 않으면 만료 전까지 살아있는 탈퇴 토큰이 get_or_create로 companies 행을
+    다시 만들어 탈퇴가 무효화된다(QA H1 — 이 분기에 회귀 안전망이 없었다)."""
+    _patch(monkeypatch, email_verified=True, withdrawn=True)
+    with pytest.raises(HTTPException) as exc:
+        deps.get_current_user(_FakeRequest("tok"), db=None)
+    assert exc.value.status_code == 401
+    assert "탈퇴" in exc.value.detail
+    assert _FakeCompanyRepo.get_or_create_called is False   # 회사 부활 안 됨
 
 
 # ── AUTH_DISABLED 운영 가드 ─────────────────────────────────────────

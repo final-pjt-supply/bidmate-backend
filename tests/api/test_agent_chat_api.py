@@ -215,3 +215,53 @@ def test_daily_rate_limit_maps_to_429(client_with_runner):
     r = client.post("/agent/chat", json={"query": "q"})
     assert r.status_code == 429
     assert "오늘" in r.json()["detail"]
+
+
+# ── 실패 경로에서도 동시성 슬롯이 해제된다 (QA H1 인접 — finally 계약) ──
+# 누수하면 chat_concurrency_max회 실패 뒤 그 회사가 계속 429(채팅 영구 축소)가 된다.
+class _StepUsage:
+    """처음 over_times번은 일일 상한 초과값, 그 뒤엔 정상값(1)을 돌려준다."""
+
+    def __init__(self, over_times: int):
+        self.calls = 0
+        self.over_times = over_times
+
+    def incr_and_get(self, company_id):
+        self.calls += 1
+        return 99999 if self.calls <= self.over_times else 1
+
+
+def test_daily_429_releases_concurrency_slot(client_with_runner):
+    """일일 429가 슬롯을 잡은 뒤(acquire 후) 나므로, 매번 해제돼야 후속이 통과한다.
+    누수라면 chat_concurrency_max회 429 후 acquire가 막혀 다음 요청도 429다."""
+    from app.config import get_settings
+    n = get_settings().chat_concurrency_max
+    client, _ = client_with_runner([
+        AgentResponse(action="answer", answer="ok", session_context=make_ctx())])
+    usage = _StepUsage(over_times=n)                      # 상태 공유(요청 간 calls 누적)
+    app.dependency_overrides[get_chat_usage_repo] = lambda: usage
+    for _ in range(n):
+        assert client.post("/agent/chat", json={"query": "q"}).status_code == 429
+    # 슬롯이 매번 해제됐다면 이제 정상 획득 + 일일도 정상값 → 200
+    assert client.post("/agent/chat", json={"query": "q"}).status_code == 200
+
+
+def test_agent_502_releases_concurrency_slot(client_with_runner):
+    """에이전트 실패(502)는 yield 도중 예외 → 제너레이터 finally가 슬롯을 해제한다.
+    누수라면 chat_concurrency_max회 502 후 다음 요청이 429(획득 실패)가 된다."""
+    from app.config import get_settings
+    n = get_settings().chat_concurrency_max
+    calls = {"n": 0}
+
+    def flaky_runner(req):
+        calls["n"] += 1
+        if calls["n"] <= n:
+            raise RuntimeError("Bedrock down")
+        return AgentResponse(action="answer", answer="ok", session_context=make_ctx())
+
+    client, _ = client_with_runner([])
+    app.dependency_overrides[get_agent_chat_service] = lambda: AgentChatService(
+        FakeChatRepo(), flaky_runner)
+    for _ in range(n):
+        assert client.post("/agent/chat", json={"query": "q"}).status_code == 502
+    assert client.post("/agent/chat", json={"query": "q"}).status_code == 200
