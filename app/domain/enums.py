@@ -65,3 +65,15 @@ class SearchSortKey(str, Enum):
     """
     DEADLINE = "deadline"   # 마감 임박순(bid_clse_dt ASC)
     RECENT = "recent"       # 최신 등록순(bid_ntce_dt DESC)
+
+
+class MatchSortKey(str, Enum):
+    """맞춤추천(GET /me/matches) 정렬 키.
+
+    SearchSortKey와 분리한 이유: recommended는 회사별 사전계산 결과(match_results)의
+    충족 비율에 기대는데, /bids·/bids/search는 공용 공고라 그 값이 없다. 공용 키에
+    섞으면 검색에서도 recommended가 통과해버리므로 계약을 분리한다.
+    """
+    DEADLINE = "deadline"        # 마감 임박순(bid_clse_dt ASC)
+    RECENT = "recent"            # 최신 등록순(bid_ntce_dt DESC)
+    RECOMMENDED = "recommended"  # 추천순 — 자격 충족 비율(satisfied/required) DESC

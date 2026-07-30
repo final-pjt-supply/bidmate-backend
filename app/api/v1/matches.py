@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import CurrentUser, get_authenticated_user, get_match_service
 from app.api.v1.schemas.match import MatchListResponse, MatchSummaryResponse
-from app.domain.enums import SearchSortKey
+from app.domain.enums import MatchSortKey
 from app.services.match_service import MatchService
 
 router = APIRouter(prefix="/me/matches", tags=["matches"])
@@ -16,8 +16,9 @@ router = APIRouter(prefix="/me/matches", tags=["matches"])
 
 @router.get("", response_model=MatchListResponse)
 def list_matches(
-    sort: SearchSortKey = Query(
-        default=SearchSortKey.DEADLINE, description="deadline(마감임박, 기본)/recent(최신)"
+    sort: MatchSortKey = Query(
+        default=MatchSortKey.DEADLINE,
+        description="deadline(마감임박, 기본)/recent(최신)/recommended(추천순=자격 충족 비율)",
     ),
     page: int = Query(default=1, ge=1, description="1-based. 범위 밖이면 빈 배열."),
     include_infeasible: bool = Query(

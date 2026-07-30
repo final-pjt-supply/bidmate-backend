@@ -13,7 +13,7 @@ from app.api.v1.schemas.match import (
     MatchListResponse,
     MatchSummaryResponse,
 )
-from app.domain.enums import SearchSortKey
+from app.domain.enums import MatchSortKey
 from app.infra.db.repositories.match_repository import MatchRepository
 
 PAGE_SIZE = 24   # 프론트 3열 그리드를 빈 칸 없이 채우는 맞춤추천 계약
@@ -33,7 +33,7 @@ class MatchService:
         self,
         *,
         company_id: int,
-        sort: SearchSortKey,
+        sort: MatchSortKey,
         page: int,
         include_infeasible: bool = False,
     ) -> MatchListResponse:
