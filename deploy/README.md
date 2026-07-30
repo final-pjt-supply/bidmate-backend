@@ -1,4 +1,4 @@
-# BidMate API — 기존 systemd 배포
+# BidFriend API — 기존 systemd 배포
 
 > 이 문서는 최초 EC2 구성과 비상 롤백용 기존 방식이다. 신규 배포는
 > [Nginx Blue/Green CI/CD](CD.md)를 사용한다.

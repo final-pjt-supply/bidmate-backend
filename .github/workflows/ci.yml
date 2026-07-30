@@ -85,7 +85,7 @@ jobs:
       - name: Import smoke test
         run: |
           python -c "import agents.run"
-          python -c "from app.main import app; assert app.title == 'BidMate API'"
+          python -c "from app.main import app; assert app.title == 'BidFriend API'"
 
       - name: Run tests
         run: python -m pytest -q --maxfail=1

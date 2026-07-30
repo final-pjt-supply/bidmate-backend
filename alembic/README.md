@@ -1,4 +1,4 @@
-# Alembic — BidMate API 서버 마이그레이션
+# Alembic — BidFriend API 서버 마이그레이션
 
 ## 소유권 모델 (중요)
 
