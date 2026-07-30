@@ -92,13 +92,17 @@ class MatchRepository:
         stmt = stmt.order_by(*order).limit(limit).offset(offset)
         return [(row[0], row[1]) for row in self._session.execute(stmt).all()]
 
-    # 컬럼 순서는 compute_match_results의 RETURNS TABLE 순서와 정확히 일치한다
-    # (SELECT * 로 그대로 들어간다). computed_at은 기본값(now KST)이라 뺀다.
+    # compute_match_results의 RETURNS TABLE 10컬럼을 명시로 뽑는다. SELECT * 로 받으면
+    # 함수 출력 순서/개수가 바뀔 때 INSERT 컬럼과 조용히 어긋나 오적재된다 — 명시하면
+    # 불일치 시 곧바로 에러가 난다(계약 결합 하드닝). computed_at은 기본값(now KST)이라 뺀다.
+    _COMPUTE_COLS = (
+        "company_id, bid_ntce_no, bid_ntce_ord, verdict, required, satisfied, "
+        "gate_failed, need_review, axes, normalizer_version"
+    )
     _RESEED_SQL = text(
         "INSERT INTO match_results "
-        "(company_id, bid_ntce_no, bid_ntce_ord, verdict, required, satisfied, "
-        " gate_failed, need_review, axes, normalizer_version) "
-        "SELECT * FROM compute_match_results(CAST(:cid AS bigint))"
+        f"({_COMPUTE_COLS}) "
+        f"SELECT {_COMPUTE_COLS} FROM compute_match_results(CAST(:cid AS bigint))"
     )
     _DELETE_SQL = text("DELETE FROM match_results WHERE company_id = :cid")
 
@@ -131,11 +135,12 @@ class MatchRepository:
     #
     # computed_at을 UPDATE에서 명시적으로 갱신한다 — 기본값은 INSERT에만 적용되고,
     # 이 값이 다음 주기의 '어디까지 계산했나' 기준이라 안 올리면 같은 공고를 계속 다시 쓴다.
+    # 별칭 m으로 뽑으므로 컬럼도 m. 접두로 명시한다(B-1과 같은 이유 — SELECT * 금지).
+    _COMPUTE_COLS_M = ", ".join(f"m.{c.strip()}" for c in _COMPUTE_COLS.split(","))
     _UPSERT_SINCE_SQL = text(
         "INSERT INTO match_results "
-        "(company_id, bid_ntce_no, bid_ntce_ord, verdict, required, satisfied, "
-        " gate_failed, need_review, axes, normalizer_version) "
-        "SELECT * FROM compute_match_results(CAST(:cid AS bigint)) m "
+        f"({_COMPUTE_COLS}) "
+        f"SELECT {_COMPUTE_COLS_M} FROM compute_match_results(CAST(:cid AS bigint)) m "
         "WHERE (m.bid_ntce_no, m.bid_ntce_ord) IN ("
         "  SELECT s.bid_ntce_no, s.bid_ntce_ord FROM bid_require_summary s"
         "  WHERE s.normalized_at > :since) "
