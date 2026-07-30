@@ -1,0 +1,52 @@
+name: Sync agent version
+
+# 에이전트 레포(bidmate-ai-agent)가 main push 시 보내는 repository_dispatch를 받아
+# app/requirements.txt의 bidmate-agents SHA를 최신으로 범프하는 PR을 자동 생성한다.
+# (A안: 자동 PR + 사람이 머지. 머지 후 기존 CI→CD가 새 에이전트로 배포.)
+#
+# ⚠ PR 생성은 반드시 PAT(AGENT_SYNC_PAT)로 한다 — 기본 GITHUB_TOKEN으로 만든 PR은
+#    CI(pull_request)를 트리거하지 않아 테스트 게이트가 무력화된다.
+on:
+  repository_dispatch:
+    types: [agent-updated]
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout (PAT로 — 브랜치 push 위해)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.AGENT_SYNC_PAT }}
+
+      - name: Bump agent SHA and open PR
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_SYNC_PAT }}
+          SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::유효하지 않은 에이전트 SHA: '${SHA}'"; exit 1
+          fi
+          req="app/requirements.txt"
+          if grep -q "bidmate-ai-agent\.git@${SHA}" "${req}"; then
+            echo "이미 최신(${SHA}) — 스킵"; exit 0
+          fi
+
+          branch="chore/agent-sync-${SHA:0:12}"
+          # 같은 SHA 브랜치가 이미 있으면(중복 dispatch) 스킵.
+          if git ls-remote --exit-code --heads origin "${branch}" >/dev/null 2>&1; then
+            echo "브랜치 ${branch} 이미 존재 — 스킵"; exit 0
+          fi
+
+          git config user.name "agent-sync-bot"
+          git config user.email "agent-sync-bot@users.noreply.github.com"
+          git checkout -b "${branch}"
+          sed -i -E "s|(bidmate-ai-agent\.git@)[0-9a-f]{40}|\1${SHA}|" "${req}"
+          git commit -am "Chore : bidmate-agents 자동 범프 -> ${SHA:0:12} (agent main)"
+          git push -u origin "${branch}"
+          gh pr create --base main --head "${branch}" \
+            --title "Chore : bidmate-agents 자동 범프 (${SHA:0:12})" \
+            --body "에이전트 레포 main push 자동 동기화(repository_dispatch). CI 통과 후 머지하면 CD가 새 에이전트로 배포합니다.
+
+          SHA: \`${SHA}\`"
