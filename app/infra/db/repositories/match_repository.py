@@ -78,15 +78,19 @@ class MatchRepository:
     ) -> list[tuple[MatchResult, Bid]]:
         """한 페이지의 (매칭, 공고) 쌍.
 
-        판정 우선순위(가능>보완가능>그외)를 모든 정렬의 1차 키로 둔다 — deadline/recent
-        에서도 '가능'이 '확인필요'보다 위로 온다(B §1). 그 안에서:
-          * deadline   : 마감 임박순 bid_clse_dt ASC + NULLS LAST
+        마감일 없는(bid_clse_dt NULL) 공고는 모든 정렬에서 맨 뒤로 보낸다 — 마감을
+        판정할 수 없는(오래됐을 수 있는) 공고가 상단을 차지하지 않게. 그 다음
+        판정 우선순위(가능>보완가능>그외)를 1차 키로 둔다 — deadline/recent에서도
+        '가능'이 위로 온다(B §1). 그 안에서:
+          * deadline   : 마감 임박순 bid_clse_dt ASC
           * recent     : 최신 등록순 bid_ntce_dt DESC + NULLS LAST
           * recommended: 자격 충족 비율(satisfied/required) DESC — 많이 충족한 공고부터.
                          비율 동률이면 요구가 많은 것(required DESC, 8/8 > 1/1) 먼저.
-                         required=0은 비율이 없어 NULLS LAST로 맨 뒤.
+                         required=0은 비율이 없어 NULLS LAST로 (마감일 있는 것 중) 뒤.
         페이지 경계에서 행이 중복·누락되지 않게 bid_id로 최종 tie-break.
         """
+        # 마감일 없는 공고를 맨 뒤로(0=마감일 있음 먼저, 1=NULL 나중).
+        no_deadline = Bid.bid_clse_dt.is_(None)
         # 참가 가치 우선순위 — 가능 > 보완가능 > 그 외(확인필요·NULL).
         verdict_rank = case(
             (MatchResult.verdict == "가능", 0),
@@ -96,18 +100,19 @@ class MatchRepository:
         stmt = select(MatchResult, Bid).join(Bid, _JOIN_ON)
         stmt = self._apply_filters(stmt, company_id, clse_after, include_infeasible)
         if sort == "recent":
-            order = (verdict_rank, Bid.bid_ntce_dt.desc().nulls_last(), Bid.bid_id.asc())
+            order = (no_deadline, verdict_rank, Bid.bid_ntce_dt.desc().nulls_last(), Bid.bid_id.asc())
         elif sort == "recommended":
             # required=0이면 0으로 나누게 되므로 NULLIF로 NULL 처리(→ NULLS LAST).
             ratio = MatchResult.satisfied * 1.0 / func.nullif(MatchResult.required, 0)
             order = (
+                no_deadline,
                 ratio.desc().nulls_last(),
                 MatchResult.required.desc().nulls_last(),  # 동률이면 요구 많은 것 먼저(8/8 > 1/1)
                 Bid.bid_clse_dt.asc().nulls_last(),
                 Bid.bid_id.asc(),
             )
         else:  # deadline
-            order = (verdict_rank, Bid.bid_clse_dt.asc().nulls_last(), Bid.bid_id.asc())
+            order = (no_deadline, verdict_rank, Bid.bid_clse_dt.asc().nulls_last(), Bid.bid_id.asc())
         stmt = stmt.order_by(*order).limit(limit).offset(offset)
         return [(row[0], row[1]) for row in self._session.execute(stmt).all()]
 
