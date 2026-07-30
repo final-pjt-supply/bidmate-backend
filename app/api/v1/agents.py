@@ -31,6 +31,11 @@ def chat(
     current_user: CurrentUser = Depends(get_authenticated_user),
     _rate: None = Depends(enforce_chat_limits),   # 회사당 분당·동시성·일일(429)
 ) -> AgentChatResponse:
+    """대화 에이전트(RAG · Bedrock). 공고 검색·자격 판정을 대화로 답한다.
+
+    company_id는 인증 토큰에서만 온다(요청 body 아님). 회사당 레이트리밋(분당·동시성·
+    일일)→429, 응답 생성 중 재입력→409, 남의 세션(IDOR)→404, 에이전트 실패→502.
+    """
     # ★ company_id는 토큰에서만 온다(요청 body 아님) — 멀티테넌시 격리의 신뢰 기준.
     try:
         session_id, resp = service.chat(

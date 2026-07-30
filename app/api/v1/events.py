@@ -25,5 +25,10 @@ def collect_event(
     service: EventService = Depends(get_event_service),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> None:
+    """고객 여정 이벤트 수집(페이지 이동·클릭 등) → S3 NDJSON 적재.
+
+    선택 인증 — 로그인 전 이벤트도 받는다(토큰 있으면 company_id를 채우고, 없으면
+    null). best-effort라 정상 저장 시 본문 없이 202로 빠르게 응답한다.
+    """
     company_id = int(current_user.company_id) if current_user.company_id else None
     service.record(payload, company_id=company_id)
