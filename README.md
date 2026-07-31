@@ -105,7 +105,7 @@ sudo docker ps --filter label=com.bidmate.service=api
 | `GET /me/profile` | 회사 자격요건 프로필 8섹션 조회 |
 | `PUT /me/profile` | 프로필 전체 저장(full replace) — 저장 성공 시 그 회사 매칭 재계산 |
 | `GET·POST·DELETE /me/scraps` | 공고 스크랩(목록/담기/빼기) |
-| `GET /me/matches` | 회사별 공고 매칭 결과 (verdict·근거, sort=deadline·recent) |
+| `GET /me/matches` | 회사별 공고 매칭 (기본 **추천순**, sort=recommended·deadline·recent). '가능'·'보완가능'만 노출, 마감일 없는 공고는 뒤로 |
 | `GET /me/matches/summary` | 매칭 가능 공고 건수(홈 대시보드) |
 | `GET /me/recommendations` | 회사별 개인화 추천 |
 
@@ -170,5 +170,10 @@ Nginx 전환·스모크 테스트·자동 롤백은 [deploy/CD.md](deploy/CD.md)
   훅(#75)과 주기 갱신 스케줄러(#80)가 DB 함수 `compute_match_results()` 결과로 채운다.
   계산 로직은 그 DB 함수에 있고 이 리포에 없다.
 - 회사 데이터는 `company_id`로 격리(멀티테넌시). 공고 원본은 공용.
-- 대화 에이전트는 `bidmate-agents`를 같은 프로세스에 임베드(ADR 0005). Bedrock·OpenSearch·
-  Cloudflare 접속 설정은 `.env`로 주입한다.
+- 대화 에이전트는 `bidmate-agents`를 같은 프로세스에 임베드(ADR 0005, 별도 서버 아님).
+  Bedrock·OpenSearch·Cloudflare 접속 설정은 `.env`로 주입한다.
+- 에이전트 버전은 `app/requirements.txt`에 **커밋 SHA로 고정**(재현성) — 반영은 그 SHA를
+  올리는 PR로 한다(에이전트 main 머지 시 자동 범프 PR을 여는 리시버 워크플로 있음:
+  `.github/workflows/agent-sync.yml`). CI가 새 에이전트로 pytest·스모크를 돌려 검증한다.
+- **운영 슬롯 부팅 가드**: 운영 배포는 Cognito·CORS(실 오리진)가 설정돼야 기동한다 —
+  미설정이면 서버가 뜨지 않고 Blue/Green이 자동 롤백한다(조용한 미스컨피그 방지).
