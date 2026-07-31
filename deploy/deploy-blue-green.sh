@@ -242,6 +242,11 @@ docker pull "${image_uri}"
 install -m 0644 "${blue_source}" "${NGINX_ROOT}/blue.conf"
 install -m 0644 "${green_source}" "${NGINX_ROOT}/green.conf"
 
+# ⚠ 마이그레이션 제약(QA #9): 이 upgrade는 후보 검증 '전에' 공유 prod RDS에 실행되고
+# (옛 슬롯이 아직 서빙 중), 배포 실패 시 rollback은 스키마를 되돌리지 않는다. 따라서
+# 반드시 '추가/하위호환(expand→migrate→contract)' 마이그레이션만 허용한다 — 옛 슬롯이
+# 새 스키마로도 계속 동작해야 하고, 파괴적 변경(컬럼 DROP 등)은 전환 창에서 옛 슬롯을
+# 깨뜨린다. RUN_MIGRATIONS는 opt-in(기본 off)이므로 켤 때 리뷰로 이 규약을 강제할 것.
 if [[ "${run_migrations}" == "true" ]]; then
   echo "Running the reviewed backward-compatible Alembic migration."
   docker run --rm \
