@@ -52,10 +52,9 @@ class RecommendationRepository:
                 Bid.qual_status == _MERGED,
                 Bid.bid_ntce_nm.is_not(None),
                 or_(Bid.bid_clse_dt >= clse_after, Bid.bid_clse_dt.is_(None)),
-                or_(
-                    MatchResult.verdict != _INFEASIBLE,
-                    MatchResult.verdict.is_(None),
-                ),
+                # '불가'만 제외. verdict는 NOT NULL 계약(D-14, match_result 모델)이라
+                # 예전 IS NULL 방어는 죽은 코드였음 → 제거해 계약과 일치시킴(QA #13).
+                MatchResult.verdict != _INFEASIBLE,
                 ~is_scrapped,
             )
         )
