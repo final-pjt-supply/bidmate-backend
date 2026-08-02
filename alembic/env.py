@@ -55,7 +55,15 @@ _AGENT_OWNED_TABLES = {
     "personnel_grade_master", "cert_master",
 }
 
-_UNMANAGED_EVEN_IF_MAPPED = _PARTIALLY_MAPPED_TABLES | _AGENT_OWNED_TABLES
+# 파이프라인(bidmate-pipeline)이 소유·적재하는 테이블. DDL은 그쪽
+# db/schema/03_bid_tags.sql이 SSOT이고, 이 앱은 읽기 매핑만 한다.
+# (bid_table과 같은 이유 — 소유가 다른 테이블을 여기서 관리하면 두 레포가
+#  같은 스키마를 두고 갈라진다.)
+_PIPELINE_OWNED_TABLES = {"bid_tags"}
+
+_UNMANAGED_EVEN_IF_MAPPED = (
+    _PARTIALLY_MAPPED_TABLES | _AGENT_OWNED_TABLES | _PIPELINE_OWNED_TABLES
+)
 
 
 def _managed(table_name: str) -> bool:
