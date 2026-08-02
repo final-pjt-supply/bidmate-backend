@@ -40,7 +40,7 @@ def test_search_returns_same_shape_as_list(client_with_rows):
     assert set(body["items"][0]) == {
         "bid_id", "bid_ntce_nm", "dminstt_nm", "bid_category",
         "sucsfbid_mthd_nm", "bid_clse_dt", "bdgt_amt",
-        "bid_prtcpt_lmt_yn", "match_score",
+        "bid_prtcpt_lmt_yn", "item_tag", "match_score",
     }
 
 

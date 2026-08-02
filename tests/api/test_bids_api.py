@@ -19,7 +19,7 @@ def test_list_returns_spec_shape_and_null_match_score(client_with_rows):
     assert set(item) == {
         "bid_id", "bid_ntce_nm", "dminstt_nm", "bid_category",
         "sucsfbid_mthd_nm", "bid_clse_dt", "bdgt_amt",
-        "bid_prtcpt_lmt_yn", "match_score",
+        "bid_prtcpt_lmt_yn", "item_tag", "match_score",
     }
     assert item["match_score"] is None
     assert item["bid_clse_dt"] == "2027-01-01T18:00:00"   # KST naive, 타임존 접미사 없음
@@ -137,3 +137,23 @@ def test_detail_missing_or_non_merged_is_404(client_with_rows):
     assert client.get("/bids/does-not-exist").status_code == 404
     # 비-merged도 '없음'과 동일하게 404(존재 여부 미노출).
     assert client.get("/bids/hidden_00").status_code == 404
+
+
+def test_item_tag_is_served_when_present(client_with_rows):
+    """품목 태그가 목록·상세에 그대로 실린다.
+
+    실제 필터링(신뢰도 낮은 태그를 NULL로 바꾸는 것)은 Bid.item_tag의 상관
+    서브쿼리가 SQL에서 하므로 여기서는 검증하지 않는다 — 이 레포의 API 테스트는
+    FakeBidRepository를 쓰고 DB에 붙지 않는다. 여기서 지키는 건 응답 계약이다.
+    """
+    client = client_with_rows([make_bid(item_tag="IT시스템")])
+    assert client.get("/bids").json()["items"][0]["item_tag"] == "IT시스템"
+    assert client.get("/bids/20260714123_00").json()["item_tag"] == "IT시스템"
+
+
+def test_item_tag_is_null_when_absent(client_with_rows):
+    """태그가 없으면 null이다. 프론트는 이 값만 보고 배지를 그릴지 정한다 —
+    '미분류' 같은 문자열을 대신 내려보내면 화면이 그걸 태그로 착각한다."""
+    client = client_with_rows([make_bid()])
+    assert client.get("/bids").json()["items"][0]["item_tag"] is None
+    assert client.get("/bids/20260714123_00").json()["item_tag"] is None

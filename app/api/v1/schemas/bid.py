@@ -27,6 +27,9 @@ class BidListItem(BaseModel):
     bid_clse_dt: datetime | None = None
     bdgt_amt: int | None = None
     bid_prtcpt_lmt_yn: bool | None = None
+    # 품목 태그. 업종(bid_category)의 하위 분류다(예: 물품 -> 토목·건설자재).
+    # 분류기 신뢰도가 낮으면 null — 프론트는 판단하지 말고 있을 때만 그린다.
+    item_tag: str | None = None
     match_score: float | None = None   # 에이전트 완성 전까지 항상 null
 
 
@@ -58,6 +61,7 @@ class BidDetail(BaseModel):
     bid_qlfct_rgst_dt: datetime | None = None
     openg_dt: datetime | None = None
     bid_ntce_dtl_url: str | None = None
+    item_tag: str | None = None   # 목록과 동일 규약(신뢰도 낮으면 null)
     # 서비스가 플랫 행에서 조립해 채운다. from_attributes로 model_validate(row) 할 때
     # ORM 행엔 'qualification' 속성이 없어 빈 기본값이 들어가고, 직후 서비스가 덮어쓴다.
     qualification: Qualification = Field(default_factory=Qualification)
