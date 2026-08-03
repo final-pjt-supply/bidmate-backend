@@ -17,6 +17,19 @@ class BidCategory(str, Enum):
     FRGCPT = "frgcpt"   # 외자
 
 
+class StatsCategory(str, Enum):
+    """통계 화면의 업종 축. BidCategory + 업종 무관 'ALL'.
+
+    ALL은 bid_table의 값이 아니라 집계 축이다(bid_stats matview가 c='ALL' 행을
+    따로 갖는다). 업종별 상위 N을 합쳐서는 전체 순위가 나오지 않아 별도 집계가 필요하다.
+    """
+    ALL = "ALL"
+    CNSTWK = "cnstwk"
+    SERVC = "servc"
+    THNG = "thng"
+    FRGCPT = "frgcpt"
+
+
 class QualStatus(str, Enum):
     """자격 병합 상태. DB enum이 아니라 VARCHAR + 애플리케이션 규약
     (merge/logic.py determine_qual_status가 SSOT). 조회 API는 merged만 노출한다."""
