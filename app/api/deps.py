@@ -35,6 +35,7 @@ from app.infra.db.repositories.recommendation_repository import (
     RecommendationRepository,
 )
 from app.infra.db.repositories.scrap_repository import ScrapRepository
+from app.infra.db.repositories.stats_repository import StatsRepository
 from app.infra.db.session import get_session
 from app.infra.search.recommendation_search import RecommendationSearch
 from app.infra.s3.event_sink import get_event_sink
@@ -46,6 +47,7 @@ from app.services.master_service import MasterService
 from app.services.match_service import MatchService
 from app.services.recommendation_service import RecommendationService
 from app.services.scrap_service import ScrapService
+from app.services.stats_service import StatsService
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +216,10 @@ def get_recommendation_service(
 
 def get_master_service(db: Session = Depends(get_db)) -> MasterService:
     return MasterService(MasterRepository(db))
+
+
+def get_stats_service(db: Session = Depends(get_db)) -> StatsService:
+    return StatsService(StatsRepository(db))
 
 
 def get_event_service() -> EventService:
