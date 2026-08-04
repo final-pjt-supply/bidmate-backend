@@ -260,6 +260,10 @@ fi
 
 docker rm --force "${candidate_container}" >/dev/null 2>&1 || true
 
+# --add-host host-gateway: the API calls the chat agent over HTTP (POST /turn on the
+# host's Nginx :8010). This container is on the bridge network, so 127.0.0.1 is the
+# container itself and never reaches that listener. AGENT_BASE_URL in the env file
+# must point at host.docker.internal (see deploy/env.ec2.example).
 docker run --detach \
   --name "${candidate_container}" \
   --env-file "${env_file}" \
@@ -268,6 +272,7 @@ docker run --detach \
   --env "APP_VERSION=${version}" \
   --env "DEPLOYMENT_SLOT=${candidate_slot}" \
   --publish "127.0.0.1:${candidate_port}:8000" \
+  --add-host "host.docker.internal:host-gateway" \
   --restart unless-stopped \
   --stop-timeout 30 \
   --log-opt max-size=10m \

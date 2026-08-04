@@ -5,7 +5,7 @@
 '수정 없이 그대로' 넣는다. 이제 인메모리가 아니라 RDS(ChatRepository)에 보관한다
 — 서버 재시작·멀티턴에도 문맥이 유지되고 대화 이력이 남는다.
 
-턴 처리 순서(실패 경계): open_turn(세션 확보 + user 메시지 커밋) → run_agent →
+턴 처리 순서(실패 경계): open_turn(세션 확보 + user 메시지 커밋) → 에이전트 호출 →
 성공 시 close_turn(assistant 메시지 + 컨텍스트 커밋). 에이전트가 실패해도 질문은
 이미 남아 재시도 가능하고, 컨텍스트는 마지막 성공분이 유지된다.
 
@@ -13,9 +13,12 @@
 (SessionBusyError→409). 응답 생성 중 재입력에 의한 컨텍스트 레이스를 막는다.
 단일 상시 프로세스 전제라 인프로세스 락으로 충분(스케일아웃 시 Redis 분산락).
 
-run_agent는 지연 임포트한다 — agents.llm이 임포트 시점에 load_dotenv()로 자기
-리포의 .env를 os.environ에 주입하는 부작용이 있어, 백엔드 Settings가 먼저 로드되기
-전에 임포트되면 그쪽 POSTGRES_* 값이 백엔드 DB 설정을 오염시킨다.
+runner는 주입받는다. 운영 runner는 AgentServiceClient(HTTP, POST /turn) —
+에이전트가 별도 프로세스로 분리되면서 in-process run_agent 직접 호출을 대체했다
+(app/agents/agent_client.py). 백엔드는 에이전트 구현이 아니라 계약
+(agents.schemas)만 임포트하므로 agents.llm의 import-time load_dotenv()가 백엔드
+DB 설정을 오염시키던 문제도 사라졌다. 테스트는 가짜 runner를 넣어 에이전트
+프로세스 없이 왕복 규약만 검증한다.
 """
 import threading
 from contextlib import contextmanager
@@ -54,17 +57,14 @@ def _one_turn(session_id: str):
             _inflight.discard(session_id)
 
 
-class AgentChatService:
-    def __init__(self, repository: ChatRepository,
-                 runner: Callable[[AgentRequest], AgentResponse] | None = None):
-        self._repo = repository
-        self._runner = runner          # None이면 첫 호출에 run_agent를 늦게 묶는다
+# 한 턴을 처리하는 호출 가능 객체. 운영은 HTTP 클라이언트, 테스트는 가짜.
+Runner = Callable[[AgentRequest], AgentResponse]
 
-    def _run(self, req: AgentRequest) -> AgentResponse:
-        if self._runner is None:
-            from agents.run import run_agent
-            self._runner = run_agent
-        return self._runner(req)
+
+class AgentChatService:
+    def __init__(self, repository: ChatRepository, runner: Runner):
+        self._repo = repository
+        self._runner = runner
 
     def chat(self, *, query: str, company_id: str,
              entry_bid_id: str | None = None,
@@ -82,7 +82,7 @@ class AgentChatService:
             req = AgentRequest(query=query, company_id=company_id,
                                entry_context=EntryContext(bid_id=entry_bid_id),
                                session_context=ctx)
-            resp = self._run(req)   # 실패 시 user 메시지는 남고 가드 해제(finally)
+            resp = self._runner(req)   # 실패 시 user 메시지는 남고 가드 해제(finally)
             self._repo.close_turn(sid, resp)   # assistant + 컨텍스트 커밋
         return sid, resp
 

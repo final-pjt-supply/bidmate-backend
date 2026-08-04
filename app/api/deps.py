@@ -14,6 +14,7 @@ from functools import lru_cache
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.agents.agent_client import get_agent_client
 from app.agents.chat_rate_limit import RateLimited
 from app.agents.chat_rate_limit import guard as _chat_guard
 from app.agents.chat_service import AgentChatService
@@ -229,7 +230,8 @@ def get_event_service() -> EventService:
 
 def get_agent_chat_service(db: Session = Depends(get_db)) -> AgentChatService:
     # 세션/대화는 RDS 영속(ADR-22) — ChatRepository로 세션 컨텍스트·메시지 저장.
-    return AgentChatService(ChatRepository(db))
+    # 에이전트 자체는 별도 서비스(루프백 8010)라 HTTP 클라이언트를 runner로 꽂는다.
+    return AgentChatService(ChatRepository(db), get_agent_client())
 
 
 def get_chat_query_service(db: Session = Depends(get_db)) -> ChatQueryService:

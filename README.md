@@ -18,7 +18,7 @@ FastAPI · Pydantic v2 · SQLAlchemy 2 · Alembic · PostgreSQL(주) · Cognito 
 app/
   api/        FastAPI 라우터·의존성·응답 스키마(DTO)
   services/   비즈니스 로직(정책·조립·페이징)
-  agents/     대화 에이전트 연결 (ADR 0005: bidmate-agents 패키지를 같은 프로세스에 임베드)
+  agents/     대화 에이전트 연결 (별도 서비스 HTTP 호출 + 세션 왕복)
   domain/     도메인 모델·enum (추출 파이프라인과 공유)
   infra/      DB 세션·ORM·repository / auth(Cognito 검증) / s3(이벤트 싱크)
   config.py   설정(.env 로딩)
@@ -170,8 +170,11 @@ Nginx 전환·스모크 테스트·자동 롤백은 [deploy/CD.md](deploy/CD.md)
   훅(#75)과 주기 갱신 스케줄러(#80)가 DB 함수 `compute_match_results()` 결과로 채운다.
   계산 로직은 그 DB 함수에 있고 이 리포에 없다.
 - 회사 데이터는 `company_id`로 격리(멀티테넌시). 공고 원본은 공용.
-- 대화 에이전트는 `bidmate-agents`를 같은 프로세스에 임베드(ADR 0005, 별도 서버 아님).
-  Bedrock·OpenSearch·Cloudflare 접속 설정은 `.env`로 주입한다.
+- 대화 에이전트는 **별도 서비스**다(루프백 8010). 백엔드는 `POST {AGENT_BASE_URL}/turn`으로
+  호출하고(`app/agents/agent_client.py`), 대화·세션 컨텍스트는 RDS에 보관한다(ADR-22).
+  `bidmate-agents` 의존성은 요청/응답 **계약(`agents.schemas`)** 공유용으로만 남아 있다.
+  Bedrock·OpenSearch·Cloudflare 접속 설정은 이제 에이전트 쪽 런타임 몫이다
+  (`.env`는 두 배포가 공유 — `deploy/env.ec2.example` 참고).
 - 에이전트 버전은 `app/requirements.txt`에 **커밋 SHA로 고정**(재현성) — 반영은 그 SHA를
   올리는 PR로 한다(에이전트 main 머지 시 자동 범프 PR을 여는 리시버 워크플로 있음:
   `.github/workflows/agent-sync.yml`). CI가 새 에이전트로 pytest·스모크를 돌려 검증한다.

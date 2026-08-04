@@ -162,6 +162,20 @@ class Settings(BaseSettings):
     cf_api_token: str = Field(default="")
     cf_embedding_model: str = Field(default="@cf/baai/bge-m3")
 
+    # --- 대화 에이전트(별도 서비스, HTTP) ---
+    # 에이전트는 같은 EC2의 별도 프로세스로 분리됐다(루프백 8010 = 에이전트 nginx
+    # → blue 8011 / green 8012). 기본값은 호스트에서 uvicorn을 직접 띄우는 로컬
+    # 개발 기준이다. ⚠ 컨테이너로 배포할 땐 127.0.0.1이 '컨테이너 자신'이라 호스트
+    # 8010에 닿지 않는다 — AGENT_BASE_URL을 host.docker.internal로 주입한다
+    # (deploy/env.ec2.example, deploy/deploy-blue-green.sh의 --add-host 참고).
+    agent_base_url: str = Field(default="http://127.0.0.1:8010")
+    # /turn 한 번이 라우팅→검색→Bedrock 합성까지 도는 장기 요청이다. 끊는 쪽이 항상
+    # 호출자(백엔드)이도록 에이전트 nginx(300s)·백엔드 nginx(180s)보다 짧게 잡는다.
+    agent_timeout_sec: float = Field(default=60.0)
+    # 죽은/미기동 에이전트를 60초 기다리지 않고 빨리 실패시킨다(에이전트 nginx의
+    # proxy_connect_timeout 5s와 동일). 루프백이라 연결은 즉시 되거나 안 된다.
+    agent_connect_timeout_sec: float = Field(default=5.0)
+
     @property
     def cognito_issuer(self) -> str:
         """토큰의 iss 클레임과 대조할 발급자 URL."""
