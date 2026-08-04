@@ -7,6 +7,11 @@
 
 ⚠ 이 ORM은 공유 RDS 스키마의 '반영'이지 원본이 아니다 — 테이블 생성/변경은
 팀 협의 + Alembic으로만 한다(alembic/README.md). 이 앱은 create_all을 부르지 않는다.
+
+companies는 company_* 프로필(에이전트 소유, coexist 제외)과 달리 **백엔드가 Alembic으로
+관리**한다(env.py 제외목록에 없음). 그래서 autogenerate가 이 모델↔라이브를 비교하는데,
+모델이 라이브 8컬럼(id·name·biz_reg_no·email·cognito_sub·created_at·updated_at·deleted_at)을
+모두 매핑함을 확인했다(QA #10, 2026-07 라이브 대조) → 매핑 누락에 의한 DROP 위험 없음.
 """
 from datetime import datetime
 

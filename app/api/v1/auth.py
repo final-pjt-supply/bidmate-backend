@@ -22,6 +22,10 @@ def get_me(
     current_user: CurrentUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ) -> MeResponse:
+    """현재 로그인한 회사 정보(company_id·이메일·상호·사업자번호).
+
+    company_id는 인증 토큰에서만 온다. 토큰은 유효한데 회사 행이 없으면 404.
+    """
     company = CompanyRepository(db).get_by_id(current_user.company_id)
     if company is None:
         # 토큰은 유효한데 회사 행이 사라진 경우(수동 삭제 등).

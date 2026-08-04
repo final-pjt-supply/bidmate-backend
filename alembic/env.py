@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Alembic 마이그레이션 환경 — BidMate API 서버 전용.
+"""Alembic 마이그레이션 환경 — BidFriend API 서버 전용.
 
 핵심 규약(alembic/README.md 참조):
 - 관리 대상 = 이 레포가 모델로 매핑한 테이블뿐(Base.metadata에 등록된 것).
@@ -23,6 +23,8 @@ from app.infra.db.session import Base
 #   (실제로 scrap이 빠져 company_bid_scraps가 관리 밖에 있었다.) 모델을 추가하면
 #   반드시 여기도 함께 등록할 것.
 import app.infra.db.models.bid  # noqa: F401
+import app.infra.db.models.chat  # noqa: F401
+import app.infra.db.models.chat_usage  # noqa: F401
 import app.infra.db.models.company  # noqa: F401
 import app.infra.db.models.company_profile  # noqa: F401
 import app.infra.db.models.master  # noqa: F401
@@ -53,7 +55,15 @@ _AGENT_OWNED_TABLES = {
     "personnel_grade_master", "cert_master",
 }
 
-_UNMANAGED_EVEN_IF_MAPPED = _PARTIALLY_MAPPED_TABLES | _AGENT_OWNED_TABLES
+# 파이프라인(bidmate-pipeline)이 소유·적재하는 테이블. DDL은 그쪽
+# db/schema/03_bid_tags.sql이 SSOT이고, 이 앱은 읽기 매핑만 한다.
+# (bid_table과 같은 이유 — 소유가 다른 테이블을 여기서 관리하면 두 레포가
+#  같은 스키마를 두고 갈라진다.)
+_PIPELINE_OWNED_TABLES = {"bid_tags"}
+
+_UNMANAGED_EVEN_IF_MAPPED = (
+    _PARTIALLY_MAPPED_TABLES | _AGENT_OWNED_TABLES | _PIPELINE_OWNED_TABLES
+)
 
 
 def _managed(table_name: str) -> bool:

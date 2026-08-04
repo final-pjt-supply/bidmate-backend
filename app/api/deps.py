@@ -6,20 +6,28 @@
   엔드포인트가 '현재 사용자(company_id)'를 받는 통로를 지금 만들어 두고 통과시킨다.
   회사별 점수 정렬(sort=score)도 같은 통로(CurrentUser.company_id)로 들어온다.
 """
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
+from functools import lru_cache
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.agents.agent_client import get_agent_client
+from app.agents.chat_rate_limit import RateLimited
+from app.agents.chat_rate_limit import guard as _chat_guard
 from app.agents.chat_service import AgentChatService
-from app.agents.session_store import get_session_store
 from app.config import get_settings
-from app.infra.auth.cognito import TokenError, verify_id_token
+from app.infra.auth.cognito import TokenError, TokenServiceError, verify_id_token
 from app.infra.db.repositories.bid_repository import BidRepository
 from app.infra.db.repositories.company_profile_repository import (
     CompanyProfileRepository,
+)
+from app.infra.db.repositories.chat_repository import ChatRepository
+from app.infra.db.repositories.chat_usage_repository import (
+    ChatUsageRepository,
+    seconds_to_kst_midnight,
 )
 from app.infra.db.repositories.company_repository import CompanyRepository
 from app.infra.db.repositories.master_repository import MasterRepository
@@ -28,16 +36,21 @@ from app.infra.db.repositories.recommendation_repository import (
     RecommendationRepository,
 )
 from app.infra.db.repositories.scrap_repository import ScrapRepository
+from app.infra.db.repositories.stats_repository import StatsRepository
 from app.infra.db.session import get_session
 from app.infra.search.recommendation_search import RecommendationSearch
 from app.infra.s3.event_sink import get_event_sink
 from app.services.bid_service import BidService
+from app.services.chat_query_service import ChatQueryService
 from app.services.company_profile_service import CompanyProfileService
 from app.services.event_service import EventService
 from app.services.master_service import MasterService
 from app.services.match_service import MatchService
 from app.services.recommendation_service import RecommendationService
 from app.services.scrap_service import ScrapService
+from app.services.stats_service import StatsService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -98,9 +111,14 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # email로 기존 회사에 계정을 잇는 경로(get_or_create)는 이메일 소유가 증명된
+    # 경우에만 안전하다. 검증되지 않은 이메일은 없는 것으로 취급해 링크·저장을 막는다
+    # → companies.email 컬럼에는 항상 검증된 값만 들어가고, 남의 회사 가로채기가 불가능.
+    # (표시명 폴백에는 원본 email을 그대로 써도 무방하다 — 저장이 아니라 화면용.)
+    verified_email = identity.email if identity.email_verified else None
     company = repo.get_or_create(
         cognito_sub=identity.sub,
-        email=identity.email,
+        email=verified_email,
         # 회사명은 가입 시 별도로 받기 전까지 이메일 앞부분을 임시 표시명으로 둔다.
         name=identity.name or (identity.email or "").split("@")[0] or "이름 미등록",
     )
@@ -121,12 +139,28 @@ def get_authenticated_user(
 
 
 def _verify_or_401(token: str):
+    """토큰을 검증한다. 실패 사유는 로그로만 남기고 응답에는 싣지 않는다.
+
+    검증 실패 사유를 그대로 돌려주면 공격자가 가짜 토큰을 던져가며 "무엇을 고쳐야
+    통과하는지"를 알아낼 수 있다. 특히 'Signature has expired'는 서명이 맞았다는
+    사실까지 알려준다. 사용자가 할 수 있는 일은 어차피 '다시 로그인' 하나뿐이라
+    상세를 알려줄 실익도 없다.
+    """
     try:
         return verify_id_token(token)
+    except TokenServiceError as exc:
+        # 우리 쪽 문제(JWKS 조회 실패·설정 누락)다. 401로 응답하면 멀쩡한 사용자에게
+        # "당신 토큰이 무효"라고 하는 셈이고, 진짜 원인이 가려져 디버깅도 어려워진다.
+        logger.error("인증 서비스 사용 불가: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="인증 서비스를 일시적으로 사용할 수 없어요. 잠시 후 다시 시도해 주세요.",
+        ) from exc
     except TokenError as exc:
+        logger.warning("토큰 검증 실패: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(exc),
+            detail="인증에 실패했어요. 다시 로그인해 주세요.",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
@@ -151,11 +185,17 @@ def get_match_service(db: Session = Depends(get_db)) -> MatchService:
     return MatchService(MatchRepository(db))
 
 
-def get_recommendation_service(
-    db: Session = Depends(get_db),
-) -> RecommendationService:
+@lru_cache(maxsize=1)
+def get_recommendation_search() -> RecommendationSearch:
+    """검색 어댑터는 프로세스당 하나만 만든다.
+
+    요청마다 새로 만들면 안에 든 httpx 커넥션 풀과 임베딩 캐시가 매번 버려져,
+    커넥션 재사용도 캐시 적중도 일어나지 않는다. 설정(get_settings)이 이미
+    프로세스 수명 캐시라 어댑터도 같은 수명으로 둔다. 상태는 커넥션·캐시뿐이고
+    회사별 데이터를 담지 않으므로 요청 간 공유해도 격리가 깨지지 않는다.
+    """
     settings = get_settings()
-    search = RecommendationSearch(
+    return RecommendationSearch(
         opensearch_url=settings.opensearch_url,
         opensearch_user=settings.opensearch_user,
         opensearch_password=settings.opensearch_password,
@@ -165,11 +205,22 @@ def get_recommendation_service(
         cf_api_token=settings.cf_api_token,
         cf_model=settings.cf_embedding_model,
     )
-    return RecommendationService(RecommendationRepository(db), search)
+
+
+def get_recommendation_service(
+    db: Session = Depends(get_db),
+) -> RecommendationService:
+    return RecommendationService(
+        RecommendationRepository(db), get_recommendation_search()
+    )
 
 
 def get_master_service(db: Session = Depends(get_db)) -> MasterService:
     return MasterService(MasterRepository(db))
+
+
+def get_stats_service(db: Session = Depends(get_db)) -> StatsService:
+    return StatsService(StatsRepository(db))
 
 
 def get_event_service() -> EventService:
@@ -177,7 +228,56 @@ def get_event_service() -> EventService:
     return EventService(get_event_sink())
 
 
-def get_agent_chat_service() -> AgentChatService:
-    # 세션은 인메모리(EC2 상시 프로세스 전제, ADR 0005) — DB 세션 불필요.
+def get_agent_chat_service(db: Session = Depends(get_db)) -> AgentChatService:
+    # 세션/대화는 RDS 영속(ADR-22) — ChatRepository로 세션 컨텍스트·메시지 저장.
     # 에이전트 자체는 별도 서비스(루프백 8010)라 HTTP 클라이언트를 runner로 꽂는다.
-    return AgentChatService(get_session_store(), get_agent_client())
+    return AgentChatService(ChatRepository(db), get_agent_client())
+
+
+def get_chat_query_service(db: Session = Depends(get_db)) -> ChatQueryService:
+    return ChatQueryService(ChatRepository(db))
+
+
+def get_chat_usage_repo(db: Session = Depends(get_db)) -> ChatUsageRepository:
+    return ChatUsageRepository(db)
+
+
+def _too_many(retry_after: int, detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=detail,
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+def enforce_chat_limits(
+    current_user: CurrentUser = Depends(get_authenticated_user),
+    usage: ChatUsageRepository = Depends(get_chat_usage_repo),
+) -> Iterator[None]:
+    """/agent/chat 레이트리밋 — 회사당 분당·동시성·일일(Bedrock 비용 방어).
+
+    순서: 분당(인메모리 슬라이딩) → 동시성 획득(인메모리) → 일일(RDS 원자 증가) →
+    처리 → 해제. 동시성 슬롯을 잡은 뒤엔 try/finally로 반드시 해제한다. 검증실패
+    (422 공백 등)는 이 의존성 실행 전 단계라 카운트 안 되고, 에이전트 실패(502)는
+    이미 카운트된 뒤라 포함된다(실패 턴도 비용을 유발했으므로).
+    """
+    settings = get_settings()
+    cid = int(current_user.company_id)
+    retry_msg = "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."
+    try:
+        _chat_guard.check_minute(cid, settings.rate_limit_per_min)
+    except RateLimited as exc:
+        raise _too_many(exc.retry_after, retry_msg)
+    try:
+        _chat_guard.acquire(cid, settings.chat_concurrency_max)
+    except RateLimited as exc:
+        raise _too_many(exc.retry_after, retry_msg)
+    try:
+        if usage.incr_and_get(cid) > settings.chat_daily_max:
+            raise _too_many(
+                seconds_to_kst_midnight(),
+                "오늘 사용 가능한 횟수를 초과했습니다. 내일 다시 시도해 주세요.",
+            )
+        yield
+    finally:
+        _chat_guard.release(cid)

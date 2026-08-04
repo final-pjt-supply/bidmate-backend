@@ -87,7 +87,7 @@ jobs:
           # 에이전트는 별도 서비스라 agents.run은 백엔드가 임포트하지 않는다.
           # 백엔드가 의존하는 것은 요청/응답 계약뿐이므로 그것만 확인한다.
           python -c "from agents.schemas import AgentRequest, AgentResponse"
-          python -c "from app.main import app; assert app.title == 'BidMate API'"
+          python -c "from app.main import app; assert app.title == 'BidFriend API'"
 
       - name: Run tests
         run: python -m pytest -q --maxfail=1

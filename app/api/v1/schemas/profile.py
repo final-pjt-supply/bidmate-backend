@@ -46,6 +46,7 @@ class CertOut(_Section):
 
 class PersonnelOut(_Section):
     qual_code: str
+    field_family: str | None = None   # D-19 분야(NULL=분야 무관)
     qual_name: str | None = None
     headcount: int | None = None
 
@@ -86,6 +87,14 @@ class ProfileResponse(BaseModel):
 # ── 입력(PUT /me/profile) ─────────────────────────────────────────────
 # 클라는 code만 보낸다 — _name은 서버가 마스터 조회로 채운다(신뢰경계 서버).
 # extra="forbid": 클라가 region_name 등 파생값을 밀어넣지 못하게 막는다(422).
+
+# 배열별 최대 항목 수. 정당한 회사 규모는 넘되, 한 요청이 수만 행 INSERT + 그 직후
+# 매칭 전량 재계산을 유발하는 남용을 막는다(nginx 본문 2MB 한도 안에서도 수만 행이
+# 가능하다). pydantic v2에서 리스트의 max_length는 '항목 개수' 상한이다.
+_MAX_ROWS = 100          # 코드 도메인이 작은 섹션(지역·면허·인증·인력·시평)
+_MAX_ROWS_LARGE = 500    # 품목 카탈로그(수만 코드)·실적 이력은 정당하게 더 클 수 있다
+
+
 class _Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -119,6 +128,9 @@ class CertIn(_Input):
 
 class PersonnelIn(_Input):
     qual_code: str = Field(min_length=1, max_length=20)
+    # D-19 인력 분야. 허용값(15종)은 DB CHECK에 위임 — 잘못된 코드는 저장 시 422.
+    # None = 분야 무관(등급만 요구하는 공고용). 자격당 분야별로 여러 행을 보낼 수 있다.
+    field_family: str | None = Field(default=None, max_length=12)
     headcount: int = Field(gt=0)   # NOT NULL, CHECK(headcount > 0)
 
 
@@ -146,10 +158,12 @@ class ProfileUpsertRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     qualification: QualificationIn | None = None
-    regions: list[RegionIn] = []
-    licenses: list[LicenseIn] = []
-    items: list[ItemIn] = []
-    certs: list[CertIn] = []
-    personnel: list[PersonnelIn] = []
-    capacity_evals: list[CapacityEvalIn] = []
-    performance_records: list[PerformanceRecordIn] = []
+    regions: list[RegionIn] = Field(default_factory=list, max_length=_MAX_ROWS)
+    licenses: list[LicenseIn] = Field(default_factory=list, max_length=_MAX_ROWS)
+    items: list[ItemIn] = Field(default_factory=list, max_length=_MAX_ROWS_LARGE)
+    certs: list[CertIn] = Field(default_factory=list, max_length=_MAX_ROWS)
+    personnel: list[PersonnelIn] = Field(default_factory=list, max_length=_MAX_ROWS)
+    capacity_evals: list[CapacityEvalIn] = Field(default_factory=list, max_length=_MAX_ROWS)
+    performance_records: list[PerformanceRecordIn] = Field(
+        default_factory=list, max_length=_MAX_ROWS_LARGE
+    )

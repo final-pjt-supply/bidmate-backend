@@ -8,10 +8,15 @@ db/schema/01_bid_table.sql(SSOT)을 미러링한다. 조회 API가 실제로 서
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, Numeric, String, Text
+from sqlalchemy import BigInteger, Boolean, Numeric, String, Text, select
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, column_property, mapped_column
 
+from app.infra.db.models.bid_tag import (
+    LOW_CONFIDENCE_SUFFIX,
+    NO_BASIS_SOURCE,
+    BidTag,
+)
 from app.infra.db.session import Base
 
 
@@ -68,3 +73,27 @@ class Bid(Base):
 
     # --- 노출 게이트 ---
     qual_status: Mapped[str | None] = mapped_column(String(20))
+
+
+# 품목 태그(bidmate-pipeline#97). 상관 서브쿼리를 컬럼처럼 붙여, 목록·검색·상세·추천이
+# 모두 Bid를 select하는 것만으로 태그를 함께 받게 한다 — 조회 메서드를 하나도 안 고쳐도
+# 되고, relationship + lazy load에서 생기는 N+1도 없다.
+#
+# 신뢰도가 임계값 미만(source가 _low로 끝남)이거나 근거가 없으면(none) NULL을 준다.
+# "미분류"는 공고에 대한 정보가 아니라 우리 분류기의 한계라, 화면에 배지로 띄우면
+# 담당자 판단에 도움이 안 되면서 자리만 차지한다(전체의 약 7.9%).
+# 이 판단을 여기 한 곳에 두어 프론트는 null 여부만 보면 되게 한다.
+#
+# ⚠ 통계는 반대다. 미분류를 빼면 분포가 왜곡되므로 별도 항목으로 집계해야 하고,
+#   그쪽은 bid_tags를 직접 조회해야 한다(이 프로퍼티를 쓰면 안 된다).
+Bid.item_tag = column_property(
+    select(BidTag.tag)
+    .where(
+        BidTag.bid_id == Bid.bid_id,
+        BidTag.source != NO_BASIS_SOURCE,
+        ~BidTag.source.endswith(LOW_CONFIDENCE_SUFFIX),
+    )
+    .correlate_except(BidTag)
+    .scalar_subquery(),
+    deferred=False,
+)

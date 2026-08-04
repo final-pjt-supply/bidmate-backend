@@ -36,8 +36,8 @@ class CompanyProfileRepository:
     def __init__(self, session):
         self._session = session
 
-    def _all(self, model, company_id: int, order):
-        stmt = select(model).where(model.company_id == company_id).order_by(order)
+    def _all(self, model, company_id: int, *order):
+        stmt = select(model).where(model.company_id == company_id).order_by(*order)
         return list(self._session.execute(stmt).scalars().all())
 
     def load(self, company_id: int) -> ProfileRows:
@@ -52,7 +52,13 @@ class CompanyProfileRepository:
             licenses=self._all(CompanyLicense, company_id, CompanyLicense.license_code),
             items=self._all(CompanyItem, company_id, CompanyItem.item_code),
             certs=self._all(CompanyCert, company_id, CompanyCert.cert_code),
-            personnel=self._all(CompanyPersonnel, company_id, CompanyPersonnel.qual_code),
+            # 분야별 다중 행이 생기므로 (자격, 분야)로 정렬 — 왕복 순서를 결정적으로.
+            personnel=self._all(
+                CompanyPersonnel,
+                company_id,
+                CompanyPersonnel.qual_code,
+                CompanyPersonnel.field_family,
+            ),
             capacity_evals=self._all(
                 CompanyCapacityEval, company_id, CompanyCapacityEval.license_code
             ),

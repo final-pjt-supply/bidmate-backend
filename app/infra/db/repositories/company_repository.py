@@ -5,12 +5,21 @@ Cognito에 가입한 사용자는 우리 DB에 자동으로 생기지 않는다.
 JIT(Just-In-Time)로 회사 행을 만든다 — 별도 '가입 완료' API 없이도 company_id가
 확보되고, 이후 회사정보(company_* 테이블)는 이 id에 붙는다.
 """
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.infra.db.models.company import Company
+
+# DB는 KST naive로 저장한다(match_results.computed_at·chat 등과 통일). 서버 tz(UTC)
+# 로컬시각을 쓰면 9시간 skew가 나므로 전 저장소가 이 규약을 따른다.
+_KST = timezone(timedelta(hours=9))
+
+
+def _now_kst() -> datetime:
+    return datetime.now(_KST).replace(tzinfo=None)
 
 
 class CompanyRepository:
@@ -62,7 +71,17 @@ class CompanyRepository:
 
         company = Company(cognito_sub=cognito_sub, email=email, name=name)
         self._session.add(company)
-        self._session.commit()
+        try:
+            self._session.commit()
+        except IntegrityError:
+            # 동시 첫 요청(로그인 직후 병렬 호출)이 먼저 같은 cognito_sub 행을 만들어
+            # 유니크 제약에 걸린 경우 — 500 대신 그 행으로 수렴한다(멱등). 다른 제약
+            # 위반이면 수렴 대상이 없으므로 그대로 재던진다(원인 은닉 금지).
+            self._session.rollback()
+            existing = self.get_by_cognito_sub(cognito_sub)
+            if existing is not None:
+                return existing
+            raise
         self._session.refresh(company)
         return company
 
@@ -86,6 +105,6 @@ class CompanyRepository:
         company = self.get_by_id(company_id)
         if company is None:
             return False
-        company.deleted_at = datetime.now()
+        company.deleted_at = _now_kst()   # KST naive(전역 규약) — 서버 tz 로컬시각 금지
         self._session.commit()
         return True

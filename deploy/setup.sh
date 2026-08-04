@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# BidMate API 개발 서버 세팅 (Ubuntu 24.04 arm64 / t4g). EC2에서 실행.
+# BidFriend API 개발 서버 세팅 (Ubuntu 24.04 arm64 / t4g). EC2에서 실행.
 # 사전조건: 이 리포가 /home/ubuntu/bidding-agent 에 존재 + 리포 루트에 .env 심어둠.
 #   (private 리포라 clone엔 인증 필요 — README의 '코드 올리기' 참고)
 set -euo pipefail

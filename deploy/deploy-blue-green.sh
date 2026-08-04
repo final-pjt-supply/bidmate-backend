@@ -72,7 +72,14 @@ version="${image_uri##*:}"
 registry="${image_uri%%/*}"
 
 active_slot=""
-linked_conf="$(readlink -f "${ACTIVE_LINK}" 2>/dev/null || true)"
+# readlink -f prints the canonical path even when ACTIVE_LINK does not exist,
+# which would break first-run detection (a clean box has no link yet). Only
+# resolve when it is a real symlink; otherwise treat it as absent.
+if [[ -L "${ACTIVE_LINK}" ]]; then
+  linked_conf="$(readlink -f "${ACTIVE_LINK}" 2>/dev/null || true)"
+else
+  linked_conf=""
+fi
 case "${linked_conf}" in
   "${NGINX_ROOT}/blue.conf")
     active_slot="blue"
@@ -121,7 +128,13 @@ else
 fi
 
 candidate_conf="${NGINX_ROOT}/${candidate_slot}.conf"
-previous_link="$(readlink -f "${ACTIVE_LINK}" 2>/dev/null || true)"
+# Same guard as above: only resolve a genuine symlink so first-run rollback
+# releases port 8000 for Uvicorn instead of restoring a non-existent link.
+if [[ -L "${ACTIVE_LINK}" ]]; then
+  previous_link="$(readlink -f "${ACTIVE_LINK}" 2>/dev/null || true)"
+else
+  previous_link=""
+fi
 legacy_was_active="false"
 legacy_stopped="false"
 switched="false"
@@ -201,6 +214,24 @@ wait_for_endpoint() {
   return 1
 }
 
+# nginx graceful reload keeps old workers accepting new connections during the
+# drain window, so /version can briefly still report the old slot. Poll until
+# the candidate slot answers instead of failing on the first (racy) read.
+wait_for_version() {
+  local expect_slot="$1" expect_version="$2" payload _
+  for _ in $(seq 1 15); do
+    payload="$(curl --fail --silent --max-time 5 \
+      "http://127.0.0.1:8000/version" 2>/dev/null || true)"
+    if [[ "${payload}" == *"\"version\":\"${expect_version}\""* &&
+          "${payload}" == *"\"slot\":\"${expect_slot}\""* ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Nginx did not switch to ${expect_slot}: ${payload}" >&2
+  return 1
+}
+
 echo "Authenticating the EC2 role to ${registry}."
 aws ecr get-login-password --region "${aws_region}" \
   | docker login --username AWS --password-stdin "${registry}" >/dev/null
@@ -211,6 +242,11 @@ docker pull "${image_uri}"
 install -m 0644 "${blue_source}" "${NGINX_ROOT}/blue.conf"
 install -m 0644 "${green_source}" "${NGINX_ROOT}/green.conf"
 
+# ⚠ 마이그레이션 제약(QA #9): 이 upgrade는 후보 검증 '전에' 공유 prod RDS에 실행되고
+# (옛 슬롯이 아직 서빙 중), 배포 실패 시 rollback은 스키마를 되돌리지 않는다. 따라서
+# 반드시 '추가/하위호환(expand→migrate→contract)' 마이그레이션만 허용한다 — 옛 슬롯이
+# 새 스키마로도 계속 동작해야 하고, 파괴적 변경(컬럼 DROP 등)은 전환 창에서 옛 슬롯을
+# 깨뜨린다. RUN_MIGRATIONS는 opt-in(기본 off)이므로 켤 때 리뷰로 이 규약을 강제할 것.
 if [[ "${run_migrations}" == "true" ]]; then
   echo "Running the reviewed backward-compatible Alembic migration."
   docker run --rm \
@@ -269,15 +305,9 @@ switched="true"
 
 wait_for_endpoint "http://127.0.0.1:8000/ready"
 
-version_payload="$(
-  curl --fail --silent --show-error --max-time 5 \
-    "http://127.0.0.1:8000/version"
-)"
-if [[ "${version_payload}" != *"\"version\":\"${version}\""* ||
-      "${version_payload}" != *"\"slot\":\"${candidate_slot}\""* ]]; then
-  echo "Nginx did not switch to ${candidate_slot}: ${version_payload}" >&2
-  false
-fi
+# Drain-tolerant: retry until the candidate slot serves through :8000 (a single
+# check right after reload races the old workers still draining).
+wait_for_version "${candidate_slot}" "${version}"
 
 curl --fail --silent --show-error --max-time 10 \
   "http://127.0.0.1:8000/bids?page=1" >/dev/null
@@ -305,7 +335,11 @@ if [[ -n "${old_container}" ]]; then
 fi
 
 trap - ERR
-docker image prune --force >/dev/null
+# --all: SHA로 태그된 옛 배포 이미지까지 정리한다. dangling(--force만)으로는 태그된
+# 미사용 이미지가 안 지워져 매 배포마다 쌓여 8.7GB 디스크가 결국 가득 찬다(no space
+# left on device로 배포 실패). 실행 중 컨테이너(활성 슬롯·드레인 후 정지된 이전 슬롯)가
+# 참조하는 이미지는 보존되고, 그 외 미사용만 제거된다. 롤백은 ECR 재풀로 가능.
+docker image prune --all --force >/dev/null
 docker logout "${registry}" >/dev/null 2>&1 || true
 
 echo "Deployment succeeded: ${candidate_slot} serves ${version}."

@@ -10,7 +10,11 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_authenticated_user, get_company_profile_service
+from app.api.deps import (
+    get_authenticated_user,
+    get_company_profile_service,
+    get_match_service,
+)
 from app.infra.db.repositories.company_profile_repository import ProfileRows
 from app.main import app
 from app.services.company_profile_service import CompanyProfileService
@@ -32,7 +36,8 @@ def _rows_for(company_id: int) -> ProfileRows:
         items=[SimpleNamespace(item_code="1234", item_name="노트북",
                                has_direct_production=True, direct_prod_valid_until=None)],
         certs=[SimpleNamespace(cert_code="C1", cert_name="ISO9001", valid_until=None)],
-        personnel=[SimpleNamespace(qual_code="Q1", qual_name="정보처리기사", headcount=3)],
+        personnel=[SimpleNamespace(qual_code="Q1", field_family=None,
+                                   qual_name="정보처리기사", headcount=3)],
         capacity_evals=[SimpleNamespace(license_code="0037", license_name="전기공사업",
                                         eval_amount=1_000_000, eval_year=2025)],
         performance_records=[SimpleNamespace(record_id=1, contract_name="A 구축사업",
@@ -155,19 +160,52 @@ class FakeWriteRepo:
         return self.saved or ProfileRows(None, [], [], [], [], [], [], [])
 
 
+class FakeMatchService:
+    """저장 후 재계산 훅 검증용 — 실제 DB를 안 건드린다."""
+
+    def __init__(self):
+        self.recomputed: list[int] = []
+        self.raise_on_call = False
+
+    def recompute_for_company(self, company_id):
+        if self.raise_on_call:
+            raise RuntimeError("recompute boom")
+        self.recomputed.append(company_id)
+        return 0
+
+
 @pytest.fixture
 def write_client():
     service = CompanyProfileService(FakeWriteRepo(), FakeMasterRepo())
+    match_fake = FakeMatchService()
 
     def _make(company_id: str = "9001") -> TestClient:
         app.dependency_overrides[get_company_profile_service] = lambda: service
+        app.dependency_overrides[get_match_service] = lambda: match_fake
         app.dependency_overrides[get_authenticated_user] = lambda: SimpleNamespace(
             company_id=company_id, email=None
         )
         return TestClient(app)
 
+    _make.match_fake = match_fake
     yield _make
     app.dependency_overrides.clear()
+
+
+def test_put_triggers_match_recompute(write_client):
+    """★ 자격 저장 성공 시 그 회사 매칭 재계산이 호출된다(신선도)."""
+    c = write_client()
+    r = c.put("/me/profile", json={"licenses": [{"license_code": "0037"}]})
+    assert r.status_code == 200
+    assert write_client.match_fake.recomputed == [9001]   # 토큰의 company_id
+
+
+def test_put_succeeds_even_if_recompute_fails(write_client):
+    """재계산이 터져도 저장은 성공(200) — 저장은 이미 커밋, 매칭은 배치가 채운다."""
+    write_client.match_fake.raise_on_call = True
+    c = write_client()
+    r = c.put("/me/profile", json={})
+    assert r.status_code == 200
 
 
 def test_put_fills_names_from_master(write_client):
@@ -208,6 +246,54 @@ def test_put_duplicate_code_is_422(write_client):
     assert r.status_code == 422
 
 
+# ── 인력 분야(field_family, D-19) ────────────────────────────────────
+def test_put_personnel_field_family_round_trips(write_client):
+    """★ 저장한 인력 분야가 조회 응답에 그대로 보존된다."""
+    c = write_client()
+    r = c.put("/me/profile", json={
+        "personnel": [{"qual_code": "Q1", "field_family": "ARCH", "headcount": 2}]
+    })
+    assert r.status_code == 200
+    p = r.json()["personnel"]
+    assert len(p) == 1
+    assert p[0]["field_family"] == "ARCH"
+    assert p[0]["headcount"] == 2
+
+
+def test_put_same_qual_different_field_family_ok(write_client):
+    """★ 같은 자격도 분야가 다르면 별개 행 — 저장 성공, 둘 다 보존."""
+    c = write_client()
+    r = c.put("/me/profile", json={"personnel": [
+        {"qual_code": "Q1", "field_family": "ARCH", "headcount": 1},
+        {"qual_code": "Q1", "field_family": "CIVIL", "headcount": 2},
+    ]})
+    assert r.status_code == 200
+    p = r.json()["personnel"]
+    assert len(p) == 2
+    assert {row["field_family"] for row in p} == {"ARCH", "CIVIL"}
+
+
+def test_put_null_and_typed_field_family_not_duplicate(write_client):
+    """분야 무관(None)과 분야 지정(ARCH)은 서로 다른 행 — 중복 아님."""
+    c = write_client()
+    r = c.put("/me/profile", json={"personnel": [
+        {"qual_code": "Q1", "headcount": 1},                       # field_family=None
+        {"qual_code": "Q1", "field_family": "ARCH", "headcount": 1},
+    ]})
+    assert r.status_code == 200
+    assert len(r.json()["personnel"]) == 2
+
+
+def test_put_exact_duplicate_qual_and_field_is_422(write_client):
+    """(자격, 분야)가 완전히 같은 두 행은 PK 충돌 → 미리 422."""
+    c = write_client()
+    r = c.put("/me/profile", json={"personnel": [
+        {"qual_code": "Q1", "field_family": "ARCH", "headcount": 1},
+        {"qual_code": "Q1", "field_family": "ARCH", "headcount": 3},
+    ]})
+    assert r.status_code == 422
+
+
 def test_put_forbids_client_supplied_name(write_client):
     """서버가 채우는 name을 클라가 밀어넣으면 거부(extra=forbid)."""
     c = write_client()
@@ -228,3 +314,46 @@ def test_put_requires_login(write_client):
     write_client()
     app.dependency_overrides.pop(get_authenticated_user, None)
     assert TestClient(app).put("/me/profile", json={}).status_code == 401
+
+
+# ── 입력 상한(배열 개수) ────────────────────────────────────────────
+# 한 요청으로 수만 행 INSERT + 매칭 전량 재계산을 유발하는 남용을 막는다.
+from pydantic import ValidationError  # noqa: E402
+
+from app.api.v1.schemas.profile import (  # noqa: E402
+    _MAX_ROWS,
+    _MAX_ROWS_LARGE,
+    ProfileUpsertRequest,
+)
+
+
+def test_bounded_section_over_cap_rejected():
+    """코드 도메인이 작은 섹션은 _MAX_ROWS를 넘으면 검증 오류."""
+    region = {"region_code": "11", "region_type": "hq"}
+    with pytest.raises(ValidationError):
+        ProfileUpsertRequest(regions=[region] * (_MAX_ROWS + 1))
+
+
+def test_large_section_over_cap_rejected():
+    """품목·실적은 더 크지만 그래도 _MAX_ROWS_LARGE 상한이 있다."""
+    item = {"item_code": "1234"}
+    with pytest.raises(ValidationError):
+        ProfileUpsertRequest(items=[item] * (_MAX_ROWS_LARGE + 1))
+
+
+def test_at_cap_is_accepted():
+    """딱 상한까지는 스키마 검증을 통과한다(경계값)."""
+    region = {"region_code": "11", "region_type": "hq"}
+    item = {"item_code": "1234"}
+    ok = ProfileUpsertRequest(
+        regions=[region] * _MAX_ROWS, items=[item] * _MAX_ROWS_LARGE
+    )
+    assert len(ok.regions) == _MAX_ROWS
+    assert len(ok.items) == _MAX_ROWS_LARGE
+
+
+def test_put_over_cap_is_422(write_client):
+    """상한 초과는 API에서 422로 거절된다(pydantic이 서비스 도달 전에 막음)."""
+    c = write_client()
+    body = {"regions": [{"region_code": "11", "region_type": "hq"}] * (_MAX_ROWS + 1)}
+    assert c.put("/me/profile", json=body).status_code == 422

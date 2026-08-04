@@ -13,10 +13,10 @@ from app.api.v1.schemas.match import (
     MatchListResponse,
     MatchSummaryResponse,
 )
-from app.domain.enums import SearchSortKey
+from app.domain.enums import MatchSortKey
 from app.infra.db.repositories.match_repository import MatchRepository
 
-PAGE_SIZE = 20   # /bids 목록과 동일 계약
+PAGE_SIZE = 24   # 프론트 3열 그리드를 빈 칸 없이 채우는 맞춤추천 계약
 _KST = timezone(timedelta(hours=9))   # DB는 KST naive
 
 
@@ -24,11 +24,16 @@ class MatchService:
     def __init__(self, repository: MatchRepository):
         self._repo = repository
 
+    def recompute_for_company(self, company_id: int) -> int:
+        """그 회사 매칭을 재계산(전체 교체). 자격 저장 등 입력 변경 후 호출.
+        반환은 적재된 행 수. 실패는 그대로 전파(호출자가 경계 처리)."""
+        return self._repo.recompute_for_company(company_id)
+
     def list_matches(
         self,
         *,
         company_id: int,
-        sort: SearchSortKey,
+        sort: MatchSortKey,
         page: int,
         include_infeasible: bool = False,
     ) -> MatchListResponse:

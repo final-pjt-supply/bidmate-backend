@@ -29,22 +29,52 @@ async def lifespan(app: FastAPI):
 
         sink = get_event_sink()
         sink.start()
+
+    # 매칭 주기 갱신(#80). 신규 공고를 match_results에 반영하는 주체가 여기뿐이라
+    # 끄면 회원이 프로필을 다시 저장할 때까지 새 공고가 추천에 안 나온다.
+    # 기본 off — 로컬/테스트가 운영 RDS에 배치를 돌리지 않게(실배포 .env에서 켠다).
+    refresher = None
+    if _settings.match_refresh_enabled:
+        import asyncio
+
+        from app.infra.db.session import SessionLocal
+        from app.services.match_refresh import match_refresh_loop
+
+        refresher = asyncio.create_task(
+            match_refresh_loop(
+                SessionLocal,
+                interval_sec=_settings.match_refresh_interval_sec,
+                full_hour=_settings.match_refresh_full_hour,
+            )
+        )
     try:
         yield
     finally:
+        if refresher is not None:
+            refresher.cancel()
         if sink is not None:
             sink.stop()
+        # 추천 검색 어댑터가 들고 있는 httpx 커넥션 풀 정리. 한 번도 안 쓰였으면
+        # 어댑터를 만들지 않는다(lru_cache에 값이 없으면 새로 만들 필요가 없다).
+        from app.api.deps import get_recommendation_search
+
+        if get_recommendation_search.cache_info().currsize:
+            get_recommendation_search().close()
 
 
-app = FastAPI(title="BidMate API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="BidFriend API", version="0.1.0", lifespan=lifespan)
 
 # 프론트(브라우저)가 다른 오리진에서 호출하므로 CORS 허용이 필수다. 없으면 서버가
 # 정상 응답해도 브라우저가 막는다. 허용 오리진은 설정(cors_origins, .env로 주입)에서
 # 온다 — 와일드카드(*) 대신 명시 목록을 써서 아무 사이트나 못 부르게 한다.
+#
+# allow_credentials=False: 인증은 JWT를 Authorization 헤더로 싣는다(쿠키/세션 아님)
+# → credentials 모드가 불필요하다. True로 두면 운영자가 CORS_ORIGINS=*를 넣었을 때
+# Starlette이 요청 Origin을 그대로 반사하며 credentials까지 허용하는 풋건만 넓힌다(QA M5).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_settings.cors_origins_list,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
