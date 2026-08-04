@@ -18,7 +18,7 @@ FastAPI · Pydantic v2 · SQLAlchemy 2 · Alembic · PostgreSQL(주) · Cognito 
 app/
   api/        FastAPI 라우터·의존성·응답 스키마(DTO)
   services/   비즈니스 로직(정책·조립·페이징)
-  agents/     대화 에이전트 연결 (ADR 0005: bidmate-agents 패키지를 같은 프로세스에 임베드)
+  agents/     대화 에이전트 연결 (별도 서비스 HTTP 호출 + 세션 왕복)
   domain/     도메인 모델·enum (추출 파이프라인과 공유)
   infra/      DB 세션·ORM·repository / auth(Cognito 검증) / s3(이벤트 싱크)
   config.py   설정(.env 로딩)
@@ -151,5 +151,8 @@ Nginx 전환·스모크 테스트·자동 롤백은 [deploy/CD.md](deploy/CD.md)
   소유 측 + 팀 협의로만.
 - `companies`·`company_bid_scraps`는 API가 쓰기(가입 JIT 생성·탈퇴·스크랩).
 - 회사 데이터는 `company_id`로 격리(멀티테넌시). 공고 원본은 공용.
-- 대화 에이전트는 `bidmate-agents`를 같은 프로세스에 임베드(ADR 0005). Bedrock·OpenSearch·
-  Cloudflare 접속 설정은 `.env`로 주입한다.
+- 대화 에이전트는 **별도 서비스**다. 백엔드는 `POST {AGENT_BASE_URL}/turn`으로 호출하고
+  (`app/agents/agent_client.py`), 세션 컨텍스트만 서버에 보관한다 — 에이전트는 stateless.
+  `bidmate-agents` 의존성은 요청/응답 **계약(`agents.schemas`)** 공유용으로만 남아 있다.
+  Bedrock·OpenSearch·Cloudflare 접속 설정은 이제 에이전트 쪽 런타임 몫이다
+  (`.env`는 두 배포가 공유 — `deploy/env.ec2.example` 참고).

@@ -6,15 +6,11 @@ AgentRequest.session_context에 '수정 없이 그대로' 넣는다. 모르는(�
 session_id는 첫 턴으로 간주한다 — 서버 재시작(인메모리 소실) 후에도 프론트가
 깨지지 않게 하기 위함이다.
 
-기본 runner는 agents.run.run_agent(같은 프로세스 직접 호출, ADR 0005).
-run_agent는 Bedrock을 부르므로(agents/llm.py) 배포 env에 AWS_ACCESS_KEY/
-AWS_SECRET_KEY가 필요하다. 테스트는 가짜 runner를 주입해 Bedrock 없이
-왕복 규약만 검증한다.
-
-run_agent는 지연 임포트한다 — agents.llm이 임포트 시점에 load_dotenv()로
-자기 리포(editable 설치 시 Final_Main_Agent)의 .env를 os.environ에 주입하는
-부작용이 있어, 백엔드 Settings(app.config)가 먼저 로드되기 전에 agents가
-임포트되면 그쪽 POSTGRES_* 값이 백엔드 DB 설정을 오염시킨다.
+runner는 주입받는다. 운영 runner는 AgentServiceClient(HTTP, POST /turn) —
+에이전트가 별도 프로세스로 분리되면서 in-process `run_agent` 직접 호출을 대체했다
+(app/agents/agent_client.py). 백엔드는 이제 에이전트 구현이 아니라 계약
+(`agents.schemas`)만 임포트하므로, 여기서 하는 일은 순수한 세션 왕복뿐이다.
+테스트는 가짜 runner를 넣어 에이전트 프로세스 없이 왕복 규약만 검증한다.
 """
 from typing import Callable
 
@@ -22,18 +18,14 @@ from agents.schemas import AgentRequest, AgentResponse, EntryContext
 
 from app.agents.session_store import InMemorySessionStore
 
+# 한 턴을 처리하는 호출 가능 객체. 운영은 HTTP 클라이언트, 테스트는 가짜.
+Runner = Callable[[AgentRequest], AgentResponse]
+
 
 class AgentChatService:
-    def __init__(self, store: InMemorySessionStore,
-                 runner: Callable[[AgentRequest], AgentResponse] | None = None):
+    def __init__(self, store: InMemorySessionStore, runner: Runner):
         self._store = store
-        self._runner = runner          # None이면 첫 호출에 run_agent를 늦게 묶는다
-
-    def _run(self, req: AgentRequest) -> AgentResponse:
-        if self._runner is None:
-            from agents.run import run_agent
-            self._runner = run_agent
-        return self._runner(req)
+        self._runner = runner
 
     def chat(self, *, query: str, company_id: str,
              entry_bid_id: str | None = None,
@@ -42,7 +34,7 @@ class AgentChatService:
         req = AgentRequest(query=query, company_id=company_id,
                            entry_context=EntryContext(bid_id=entry_bid_id),
                            session_context=ctx)
-        resp = self._run(req)
+        resp = self._runner(req)
         sid = session_id or self._store.new_session_id()
         self._store.set(sid, resp.session_context)
         return sid, resp

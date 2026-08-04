@@ -84,7 +84,9 @@ jobs:
 
       - name: Import smoke test
         run: |
-          python -c "import agents.run"
+          # 에이전트는 별도 서비스라 agents.run은 백엔드가 임포트하지 않는다.
+          # 백엔드가 의존하는 것은 요청/응답 계약뿐이므로 그것만 확인한다.
+          python -c "from agents.schemas import AgentRequest, AgentResponse"
           python -c "from app.main import app; assert app.title == 'BidMate API'"
 
       - name: Run tests

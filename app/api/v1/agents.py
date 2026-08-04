@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""POST /agent/chat — 대화 에이전트 진입점(ADR 0005: 라이브러리 임베드).
+"""POST /agent/chat — 대화 에이전트 진입점.
 
-HTTP 경계만 담당한다 — 세션 왕복은 AgentChatService, 에이전트 로직은
-bidmate-agents 패키지(run_agent) 소관. sync def라 FastAPI가 스레드풀에서
-돌린다(run_agent는 Bedrock 동기 호출로 수 초 블로킹될 수 있다).
+HTTP 경계만 담당한다 — 세션 왕복은 AgentChatService, 에이전트 로직은 별도
+서비스(루프백 8010의 POST /turn) 소관. sync def라 FastAPI가 스레드풀에서
+돌린다(에이전트 호출은 검색+Bedrock 합성이라 수 초~수십 초 블로킹된다).
 """
 import logging
 
@@ -31,8 +31,10 @@ def chat(
             session_id=payload.session_id,
         )
     except Exception:
-        # Bedrock 장애·스로틀 등 에이전트 실패를 맨몸 500 대신 502로 규약화 —
-        # 프론트가 '일시 오류, 재시도' UI를 만들 수 있게. 원인은 서버 로그로.
+        # 에이전트 실패를 맨몸 500 대신 502로 규약화 — 프론트가 '일시 오류, 재시도'
+        # UI를 만들 수 있게. 원인은 서버 로그로. 분리 이후엔 Bedrock 장애·스로틀뿐
+        # 아니라 에이전트 프로세스 미기동(ConnectError)·응답 지연(Timeout)도 여기로
+        # 모인다 — 어느 쪽이든 프론트가 할 일은 재시도라 같은 502로 둔다.
         logger.exception("agent chat failed")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

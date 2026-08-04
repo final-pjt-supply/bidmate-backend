@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.agents.agent_client import get_agent_client
 from app.agents.chat_service import AgentChatService
 from app.agents.session_store import get_session_store
 from app.config import get_settings
@@ -178,4 +179,5 @@ def get_event_service() -> EventService:
 
 def get_agent_chat_service() -> AgentChatService:
     # 세션은 인메모리(EC2 상시 프로세스 전제, ADR 0005) — DB 세션 불필요.
-    return AgentChatService(get_session_store())
+    # 에이전트 자체는 별도 서비스(루프백 8010)라 HTTP 클라이언트를 runner로 꽂는다.
+    return AgentChatService(get_session_store(), get_agent_client())
