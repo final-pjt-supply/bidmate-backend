@@ -123,6 +123,32 @@ def test_detail_returns_assembled_qualification(client_with_rows):
     assert "capacity_reqs" not in q
 
 
+def test_list_tolerates_unknown_category_from_db(client_with_rows):
+    """DB에 enum 밖 bid_category가 섞여도 목록 전체가 500나면 안 된다.
+
+    bid_category 값 집합은 백엔드가 통제 못 하는 추출 파이프라인과 수동 동기화된다
+    (enums.py 주석). 파이프라인이 새 코드/오타/신규 업종을 넣어도, 한 행이 전체
+    응답을 깨뜨리면 안 되고 원본값을 그대로 내려줘야 한다(센티넬 치환 금지 —
+    프론트가 새 코드를 매핑할 수 있어야 한다).
+    """
+    rows = [
+        make_bid(bid_id="ok_00", bid_ntce_no="ok", bid_category="servc"),
+        make_bid(bid_id="new_00", bid_ntce_no="new", bid_category="etc"),
+    ]
+    res = client_with_rows(rows).get("/bids")
+    assert res.status_code == 200
+    cats = {i["bid_id"]: i["bid_category"] for i in res.json()["items"]}
+    assert cats["ok_00"] == "servc"
+    assert cats["new_00"] == "etc"   # 원본값 그대로
+
+
+def test_detail_tolerates_unknown_category_from_db(client_with_rows):
+    """상세도 마찬가지 — enum 밖 category 한 건이 상세 조회를 500으로 떨구면 안 된다."""
+    res = client_with_rows([make_bid(bid_category="etc")]).get("/bids/20260714123_00")
+    assert res.status_code == 200
+    assert res.json()["bid_category"] == "etc"
+
+
 def test_cors_allows_configured_origin(client_with_rows):
     # 프론트(브라우저) 호출이 막히지 않도록 허용 오리진이 응답 헤더에 실려야 한다.
     # 기본 허용 목록(config.cors_origins)의 로컬 개발 오리진으로 검증.
