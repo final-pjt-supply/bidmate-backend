@@ -161,11 +161,18 @@ def metrics() -> Response:
     ⚠ 미인증 스크레이프 경로. 백엔드는 프라이빗 VPC라 내부에서만 도달한다
       (공개 노출 시 nginx에서 내부망만 허용할 것).
     """
-    lines = [
-        "bidmate_up 1",
-        f'bidmate_build_info{{version="{_settings.app_version}",'
-        f'slot="{_settings.deployment_slot}"}} 1',
-    ]
+    # CloudWatch 에이전트의 prometheus 스크레이퍼는 각 지표에 `# TYPE` 메타데이터를
+    # 요구한다(없으면 "NO metaData"로 드롭). Prometheus 서버는 관대하나 CW는 엄격하다.
+    def gauge(name: str, value, labels: str = "") -> list[str]:
+        return [f"# TYPE {name} gauge", f"{name}{labels} {value}"]
+
+    lines: list[str] = []
+    lines += gauge("bidmate_up", 1)
+    lines += gauge(
+        "bidmate_build_info",
+        1,
+        f'{{version="{_settings.app_version}",slot="{_settings.deployment_slot}"}}',
+    )
     pool = engine.pool
     for name, getter in (
         ("bidmate_db_pool_size", getattr(pool, "size", None)),
@@ -173,23 +180,23 @@ def metrics() -> Response:
         ("bidmate_db_pool_overflow", getattr(pool, "overflow", None)),
     ):
         try:
-            lines.append(f"{name} {getter()}")
+            lines += gauge(name, getter())
         except Exception:
-            lines.append(f"{name} -1")
-    lines.append(
-        "bidmate_bid_stats_age_seconds "
-        + str(_age_seconds(
+            lines += gauge(name, -1)
+    lines += gauge(
+        "bidmate_bid_stats_age_seconds",
+        _age_seconds(
             "SELECT EXTRACT(EPOCH FROM (now() - computed_at)) FROM bid_stats LIMIT 1"
-        ))
+        ),
     )
-    lines.append(
-        "bidmate_match_results_age_seconds "
+    lines += gauge(
+        "bidmate_match_results_age_seconds",
         # match_results.computed_at은 KST naive(모델 주석)라 now()(UTC)와 직접 빼면
         # 9시간 음수가 된다 — KST 벽시계로 맞춰 비교한다.
-        + str(_age_seconds(
+        _age_seconds(
             "SELECT EXTRACT(EPOCH FROM (timezone('Asia/Seoul', now()) - max(computed_at))) "
             "FROM match_results"
-        ))
+        ),
     )
     return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
