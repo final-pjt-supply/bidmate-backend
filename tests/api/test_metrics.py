@@ -19,6 +19,9 @@ def test_metrics_exposes_prometheus_gauges():
     assert res.status_code == 200
     assert "text/plain" in res.headers["content-type"]
     body = res.text
+    # CloudWatch 에이전트가 요구하는 # TYPE 메타데이터(없으면 지표 드롭)
+    assert "# TYPE bidmate_up gauge" in body
+    assert "# TYPE bidmate_bid_stats_age_seconds gauge" in body
     assert "bidmate_up 1" in body
     assert "bidmate_db_pool_size" in body
     assert "bidmate_db_pool_checked_out" in body
