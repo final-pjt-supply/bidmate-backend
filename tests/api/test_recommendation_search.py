@@ -46,6 +46,20 @@ def search_with_spy():
         search.close()
 
 
+def test_clients_use_fast_connect_timeout():
+    """외부(임베딩·OpenSearch) 호출이 죽은 호스트에 매달려 DB 커넥션을 물고 있지
+    않도록 connect를 짧게(3s) 조인다 — 동기 요청은 외부 호출 내내 커넥션을 쥐므로,
+    120초 매달림은 풀 소진→전체 API 캐스케이드로 번진다. read는 완만히(30s) 둔다
+    (정상 kNN·임베딩엔 충분한 여유, 측정 후 더 조일 여지)."""
+    search = _search()
+    try:
+        for client in (search._cf_client, search._os_client):
+            assert client.timeout.connect == 3.0
+            assert client.timeout.read == 30.0
+    finally:
+        search.close()
+
+
 def test_repeated_texts_are_embedded_once(search_with_spy):
     """같은 관심 쿼리로 두 번 호출하면 두 번째는 원격 호출이 없다."""
     search, spy = search_with_spy

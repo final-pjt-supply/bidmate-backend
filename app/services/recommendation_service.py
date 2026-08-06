@@ -144,9 +144,11 @@ class RecommendationService:
             limit=max(limit * 3, 30),
         )
         best: dict[str, tuple[float, InterestSignal]] = {}
+        # 후보 집합은 매 히트마다 같다 — 루프 안에서 set()을 다시 만들지 않는다.
+        candidate_id_set = set(candidate_ids)
         for signal, hits in zip(signals, hits_by_signal):
             for hit in hits:
-                if hit.bid_id not in set(candidate_ids):
+                if hit.bid_id not in candidate_id_set:
                     # 검색 filter 방어선. 외부 검색 응답을 신뢰해 자격 밖 공고를 섞지 않는다.
                     continue
                 prev = best.get(hit.bid_id)
