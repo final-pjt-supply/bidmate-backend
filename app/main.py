@@ -7,7 +7,7 @@
 """
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 from sqlalchemy import text
@@ -109,6 +109,61 @@ def version() -> dict:
         "version": _settings.app_version,
         "slot": _settings.deployment_slot,
     }
+
+
+def _age_seconds(sql: str) -> float:
+    """DB에서 나이(초)를 구한다. 접속 실패·행 없음·NULL이면 -1(폴백)."""
+    try:
+        with engine.connect() as connection:
+            row = connection.execute(text(sql)).first()
+        return round(float(row[0]), 1) if row and row[0] is not None else -1
+    except Exception:
+        return -1
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    """Prometheus 텍스트 노출(관측). 의존성 없이 핵심 게이지만 수동 노출한다.
+
+    - up / build_info: 프로세스 생존·배포 버전·슬롯
+    - db_pool_*: 커넥션 풀 사용량(외부호출 캐스케이드 가시성, ADR-31)
+    - bid_stats_age_seconds: matview 신선도 — 외부 Airflow DAG가 멈추면 늘어남(TS-25)
+    - match_results_age_seconds: 매칭 주기 갱신이 도는지
+
+    ⚠ 미인증 스크레이프 경로. 백엔드는 프라이빗 VPC라 내부에서만 도달한다
+      (공개 노출 시 nginx에서 내부망만 허용할 것).
+    """
+    lines = [
+        "bidmate_up 1",
+        f'bidmate_build_info{{version="{_settings.app_version}",'
+        f'slot="{_settings.deployment_slot}"}} 1',
+    ]
+    pool = engine.pool
+    for name, getter in (
+        ("bidmate_db_pool_size", getattr(pool, "size", None)),
+        ("bidmate_db_pool_checked_out", getattr(pool, "checkedout", None)),
+        ("bidmate_db_pool_overflow", getattr(pool, "overflow", None)),
+    ):
+        try:
+            lines.append(f"{name} {getter()}")
+        except Exception:
+            lines.append(f"{name} -1")
+    lines.append(
+        "bidmate_bid_stats_age_seconds "
+        + str(_age_seconds(
+            "SELECT EXTRACT(EPOCH FROM (now() - computed_at)) FROM bid_stats LIMIT 1"
+        ))
+    )
+    lines.append(
+        "bidmate_match_results_age_seconds "
+        # match_results.computed_at은 KST naive(모델 주석)라 now()(UTC)와 직접 빼면
+        # 9시간 음수가 된다 — KST 벽시계로 맞춰 비교한다.
+        + str(_age_seconds(
+            "SELECT EXTRACT(EPOCH FROM (timezone('Asia/Seoul', now()) - max(computed_at))) "
+            "FROM match_results"
+        ))
+    )
+    return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 # AWS Lambda 핸들러(template.yaml에서 참조).
