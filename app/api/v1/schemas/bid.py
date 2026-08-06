@@ -11,7 +11,6 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.v1.schemas.match_info import MatchInfo
-from app.domain.enums import BidCategory
 from app.domain.qualification import Qualification
 
 
@@ -22,7 +21,12 @@ class BidListItem(BaseModel):
     bid_id: str
     bid_ntce_nm: str | None = None
     dminstt_nm: str | None = None
-    bid_category: BidCategory
+    # 응답은 str이다(enum 아님). 값 집합(cnstwk/servc/thng/frgcpt)은 백엔드가 통제
+    # 못 하는 추출 파이프라인과 수동 동기화되므로, enum으로 조이면 파이프라인이 새
+    # 코드/오타를 넣은 순간 그 행 하나가 목록·상세 응답 전체를 500으로 떨군다.
+    # "원본값만 내려준다" 원칙대로 그대로 통과시킨다. 입력(쿼리 파라미터)은 반대로
+    # BidCategory enum으로 조여 422를 낸다(bids.py) — 출력만 관대하게.
+    bid_category: str
     sucsfbid_mthd_nm: str | None = None
     bid_clse_dt: datetime | None = None
     bdgt_amt: int | None = None
@@ -49,7 +53,7 @@ class BidDetail(BaseModel):
     bid_ntce_nm: str | None = None
     dminstt_nm: str | None = None
     ntce_instt_nm: str | None = None
-    bid_category: BidCategory
+    bid_category: str
     cntrct_cncls_mthd_nm: str | None = None
     sucsfbid_mthd_nm: str | None = None
     bid_methd_nm: str | None = None
