@@ -5,9 +5,12 @@
 상시 프로세스를 전제한다(Lambda로 가면 sink 대신 Firehose). 로컬은
 `uvicorn app.main:app --reload`.
 """
+import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 from sqlalchemy import text
@@ -17,6 +20,7 @@ from app.config import get_settings
 from app.infra.db.session import engine
 
 _settings = get_settings()
+_request_logger = logging.getLogger("app.request")
 
 
 @asynccontextmanager
@@ -78,6 +82,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """요청 관측성 — 상관관계 ID + 경로·상태·소요시간 로깅.
+
+    백엔드에 APM이 없어 p95·병목이 안 보인다. 이후 성능 결정(추천 캐시·프로필 저장
+    비동기화 등)을 감이 아니라 숫자로 하기 위한 최소 계기판이다. 응답의 X-Request-ID로
+    클라이언트 오류 신고와 서버 로그를 연결한다.
+    """
+    request_id = uuid.uuid4().hex
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - start) * 1000
+    response.headers["X-Request-ID"] = request_id
+    _request_logger.info(
+        "%s %s %d %.1fms rid=%s",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+        request_id,
+    )
+    return response
+
 
 app.include_router(api_router)
 

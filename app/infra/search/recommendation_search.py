@@ -12,6 +12,12 @@ import httpx
 # 활성 회사 수십 곳을 담기에 충분하다.
 _EMBEDDING_CACHE_SIZE = 512
 
+# 추천은 동기 엔드포인트라 외부 호출(임베딩·kNN) 내내 DB 커넥션을 쥔다. 죽은/느린
+# 외부가 오래 매달리면 커넥션 풀이 소진돼 전체 API로 번진다. connect는 짧게(3s —
+# 정상 연결은 <1s, 넘으면 사실상 미도달) 조여 캐스케이드를 끊고, read는 완만히(30s,
+# 정상 응답엔 충분한 여유)로 둔다. 더 공격적인 read/재시도는 p95 측정 후.
+_HTTP_TIMEOUT = httpx.Timeout(30.0, connect=3.0)
+
 
 class RecommendationSearchError(RuntimeError):
     """외부 임베딩/검색 시스템을 사용할 수 없을 때."""
@@ -86,9 +92,9 @@ class RecommendationSearch:
         # 커넥션을 유지한다. 모듈 함수(httpx.post)는 호출마다 TLS 핸드셰이크를 다시
         # 해서, 임베딩 한 번이 0.65s → 0.16s로 줄어드는 차이가 난다. 어댑터는
         # deps에서 프로세스당 하나만 만들어야 이 재사용이 실제로 일어난다.
-        self._cf_client = httpx.Client(timeout=120)
+        self._cf_client = httpx.Client(timeout=_HTTP_TIMEOUT)
         self._os_client = httpx.Client(
-            timeout=120, auth=self._auth, verify=verify_certs
+            timeout=_HTTP_TIMEOUT, auth=self._auth, verify=verify_certs
         )
 
     def close(self) -> None:
