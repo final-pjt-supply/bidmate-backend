@@ -1,0 +1,14 @@
+# CloudWatch Agent가 읽는 Prometheus 스크레이프 설정.
+# 배치 경로: /opt/aws/amazon-cloudwatch-agent/var/prometheus.yaml
+# (cloudwatch-agent-config.json의 prometheus_config_path와 일치해야 함)
+#
+# 백엔드는 nginx :8000 → 컨테이너. agent는 같은 호스트라 127.0.0.1:8000/metrics를 긁는다.
+global:
+  scrape_interval: 30s
+scrape_configs:
+  - job_name: bidmate-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["127.0.0.1:8000"]
+        labels:
+          slot: "green" # 활성 슬롯(blue/green) — 라벨용, EMF dimension으로 나감

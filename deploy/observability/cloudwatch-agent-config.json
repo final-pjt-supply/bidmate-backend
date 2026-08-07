@@ -1,0 +1,60 @@
+{
+  "agent": {
+    "run_as_user": "root"
+  },
+  "metrics": {
+    "namespace": "BidMate/Host",
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}"
+    },
+    "metrics_collected": {
+      "cpu": {
+        "measurement": ["usage_active"],
+        "totalcpu": true
+      },
+      "mem": {
+        "measurement": ["used_percent"]
+      },
+      "disk": {
+        "measurement": ["used_percent"],
+        "resources": ["/"]
+      }
+    }
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/lib/docker/containers/*/*-json.log",
+            "log_group_name": "/bidmate/api",
+            "log_stream_name": "{instance_id}",
+            "retention_in_days": 30
+          }
+        ]
+      }
+    },
+    "metrics_collected": {
+      "prometheus": {
+        "log_group_name": "/bidmate/prometheus",
+        "prometheus_config_path": "/opt/aws/amazon-cloudwatch-agent/var/prometheus.yaml",
+        "emf_processor": {
+          "metric_namespace": "BidMate/Backend",
+          "metric_declaration": [
+            {
+              "source_labels": ["job"],
+              "label_matcher": "^bidmate-backend$",
+              "dimensions": [["slot"]],
+              "metric_selectors": [
+                "^bidmate_up$",
+                "^bidmate_db_pool_.*$",
+                "^bidmate_bid_stats_age_seconds$",
+                "^bidmate_match_results_age_seconds$"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}
