@@ -109,6 +109,7 @@ sudo docker ps --filter label=com.bidmate.service=api
 | `GET /me/matches` | 회사별 공고 매칭 (기본 **추천순**, sort=recommended·deadline·recent). '가능'·'보완가능'만 노출, 마감일 없는 공고는 뒤로 |
 | `GET /me/matches/summary` | 매칭 가능 공고 건수(홈 대시보드) |
 | `GET /me/recommendations` | 회사별 개인화 추천 |
+| `GET /masters/items` | 품목 자동완성(프로필 폼용, 부분일치 `q`·`limit`). 로그인 필수 — 참조 데이터 대량수집 방지 |
 
 인력 섹션은 자격·등급에 더해 **분야(`field_family`, D-19)** 를 받는다 — 공고가
 (등급×분야×인원)으로 요구하므로 같은 자격도 분야별로 여러 행이 될 수 있다.
