@@ -96,6 +96,7 @@ sudo docker ps --filter label=com.bidmate.service=api
 | `GET /bids` | 공고 목록 (category/sort/page, 마감 지난 공고 제외) |
 | `GET /bids/{bid_id}` | 공고 상세 + 자격요건 15필드 |
 | `GET /bids/search` | 공고 검색 (q / sort=deadline·recent / include_closed) |
+| `GET /stats` | 공고 통계 집계 (총계·품목 칩·월별 추세·예산 구간·수요기관 top8, 비로그인) — `bid_stats` matview |
 
 ### 회사 🔒
 | 메서드 · 경로 | 설명 |
@@ -108,6 +109,7 @@ sudo docker ps --filter label=com.bidmate.service=api
 | `GET /me/matches` | 회사별 공고 매칭 (기본 **추천순**, sort=recommended·deadline·recent). '가능'·'보완가능'만 노출, 마감일 없는 공고는 뒤로 |
 | `GET /me/matches/summary` | 매칭 가능 공고 건수(홈 대시보드) |
 | `GET /me/recommendations` | 회사별 개인화 추천 |
+| `GET /masters/items` | 품목 자동완성(프로필 폼용, 부분일치 `q`·`limit`). 로그인 필수 — 참조 데이터 대량수집 방지 |
 
 인력 섹션은 자격·등급에 더해 **분야(`field_family`, D-19)** 를 받는다 — 공고가
 (등급×분야×인원)으로 요구하므로 같은 자격도 분야별로 여러 행이 될 수 있다.
@@ -125,10 +127,21 @@ sudo docker ps --filter label=com.bidmate.service=api
 |---|---|
 | `POST /agent/chat` | 대화 에이전트 (RAG, Bedrock). 회사당 레이트리밋(분당·동시성·일일) 적용 |
 | `POST /events` | 고객 여정 이벤트 수집 (S3 NDJSON 적재) |
-| `GET /health` | 헬스체크 |
+| `GET /health` | 헬스체크(liveness) |
+| `GET /ready` | 준비 확인(DB `SELECT 1`, 실패 시 503) |
+| `GET /version` | 배포 SHA·Blue/Green 슬롯 |
+| `GET /metrics` | Prometheus 텍스트 지표(관측) — DB 풀·matview/매칭 신선도. 미인증, 내부망 전용 |
 | `GET /docs` | Swagger 문서 |
 
 응답은 **원본값만** 내린다 — D-day 계산·코드 한글변환·금액 포맷은 프론트 담당.
+
+## 관측성 (CloudWatch)
+
+`GET /metrics`(Prometheus 텍스트, 의존성 없이 수동 노출)를 **CloudWatch Agent**가 스크레이프해
+CloudWatch로 올린다(namespace `BidMate/Backend`). 같은 에이전트가 컨테이너 로그(`/bidmate/api`)와
+호스트 지표(CPU/디스크/메모리, `BidMate/Host`)도 수집한다. **Prometheus 서버는 두지 않고** Grafana는
+CloudWatch 데이터소스로 조회한다. 에이전트 설정·설치·알람·Budgets 스크립트는 `deploy/observability/`
+(SETUP.md 참조). 핵심 게이지 — DB 풀 사용량, `bid_stats` matview 신선도, `match_results` 갱신 신선도.
 
 ## 인증 (Cognito)
 
