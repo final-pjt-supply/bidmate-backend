@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.domain.enums import QualStatus
 from app.infra.db.models.bid import Bid
 from app.infra.db.models.match_result import MatchResult
+from app.infra.db.repositories.bid_repository import not_canceled_clause
 
 _MERGED = QualStatus.MERGED.value
 # 참가 가치가 있는(참여 가능/보완하면 가능한) 판정만 기본 노출한다. '확인필요'(공고측
@@ -37,6 +38,7 @@ class MatchRepository:
     ):
         stmt = stmt.where(
             Bid.qual_status == _MERGED,
+            not_canceled_clause(),   # 취소된 공고번호 전체 제외(#140)
             MatchResult.company_id == company_id,
             # 마감 지난 공고 제외. 마감일 NULL은 "아직 안 닫힘"으로 보고 남긴다(공용 규칙).
             or_(Bid.bid_clse_dt >= clse_after, Bid.bid_clse_dt.is_(None)),

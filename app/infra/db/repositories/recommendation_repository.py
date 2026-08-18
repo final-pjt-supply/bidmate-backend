@@ -18,6 +18,7 @@ from app.infra.db.models.company_profile import (
 )
 from app.infra.db.models.match_result import MatchResult
 from app.infra.db.models.scrap import CompanyBidScrap
+from app.infra.db.repositories.bid_repository import not_canceled_clause
 from app.services.recommendation_scoring import InterestSignal
 
 _MERGED = QualStatus.MERGED.value
@@ -50,6 +51,7 @@ class RecommendationRepository:
             .where(
                 MatchResult.company_id == company_id,
                 Bid.qual_status == _MERGED,
+                not_canceled_clause(),   # 취소된 공고번호 전체 제외(#140)
                 Bid.bid_ntce_nm.is_not(None),
                 or_(Bid.bid_clse_dt >= clse_after, Bid.bid_clse_dt.is_(None)),
                 # '불가'만 제외. verdict는 NOT NULL 계약(D-14, match_result 모델)이라

@@ -34,6 +34,9 @@ class Bid(Base):
     bid_ntce_nm: Mapped[str | None] = mapped_column(Text)
     ntce_instt_nm: Mapped[str | None] = mapped_column(String(200))
     dminstt_nm: Mapped[str | None] = mapped_column(String(200))
+    # 공고종류(등록공고/재공고/취소공고/변경공고). '취소공고'면 같은 bid_ntce_no의 모든
+    # 행(원 공고 포함)을 노출에서 제외한다 — bid_repository.not_canceled_clause() 참고(#140).
+    ntce_kind_nm: Mapped[str | None] = mapped_column(String(20))
 
     # --- 일정 (KST naive TIMESTAMP — 타임존 붙이지 말 것) ---
     bid_ntce_dt: Mapped[datetime | None] = mapped_column()        # today 필터 기준

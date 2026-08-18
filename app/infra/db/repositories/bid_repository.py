@@ -4,17 +4,34 @@ services에 둔다.
 
 노출 게이트(qual_status='merged')는 모든 조회 메서드에 고정으로 박는다 — API가
 pending/partial/failed를 흘리면 안 되는 건 도메인 불변식이라, 호출부 실수로 빠질 수
-없게 여기서 강제한다.
+없게 여기서 강제한다. 취소 제외 게이트(not_canceled_clause)도 같은 불변식이다(#140).
 """
 from datetime import datetime
 
 from sqlalchemy import case, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.domain.enums import QualStatus
 from app.infra.db.models.bid import Bid
 
 _MERGED = QualStatus.MERGED.value
+_CANCELED_KIND = "취소공고"
+
+
+def not_canceled_clause():
+    """취소 제외 게이트(#140) — 나라장터는 취소를 같은 bid_ntce_no에 차수만 올린 별도
+    행(ntce_kind_nm='취소공고')으로 내려준다. 취소공고 행이 하나라도 있으면 그 공고번호의
+    모든 행(원 공고·취소공고 자신 포함)을 노출에서 제외한다. match/recommendation
+    저장소도 이 절을 가져다 쓴다 — 규칙이 갈라지지 않게 여기 한 곳에만 둔다."""
+    canceled = aliased(Bid)
+    return ~(
+        select(canceled.bid_ntce_no)
+        .where(
+            canceled.bid_ntce_no == Bid.bid_ntce_no,
+            canceled.ntce_kind_nm == _CANCELED_KIND,
+        )
+        .exists()
+    )
 
 
 def _escape_like(value: str) -> str:
@@ -31,8 +48,8 @@ class BidRepository:
         self._session = session
 
     def _merged_base(self):
-        """merged 게이트가 걸린 공통 베이스 select."""
-        return select(Bid).where(Bid.qual_status == _MERGED)
+        """merged·취소 제외 게이트가 걸린 공통 베이스 select."""
+        return select(Bid).where(Bid.qual_status == _MERGED, not_canceled_clause())
 
     def count(
         self,
@@ -43,7 +60,11 @@ class BidRepository:
         clse_after: datetime | None = None,
     ) -> int:
         """필터 적용 후 총 건수(응답 total)."""
-        stmt = select(func.count()).select_from(Bid).where(Bid.qual_status == _MERGED)
+        stmt = (
+            select(func.count())
+            .select_from(Bid)
+            .where(Bid.qual_status == _MERGED, not_canceled_clause())
+        )
         stmt = self._apply_filters(stmt, category, ntce_dt_from, ntce_dt_to, clse_after)
         return self._session.execute(stmt).scalar_one()
 
@@ -89,7 +110,11 @@ class BidRepository:
         q: str | None = None,
     ) -> int:
         """검색 필터 적용 후 총 건수."""
-        stmt = select(func.count()).select_from(Bid).where(Bid.qual_status == _MERGED)
+        stmt = (
+            select(func.count())
+            .select_from(Bid)
+            .where(Bid.qual_status == _MERGED, not_canceled_clause())
+        )
         stmt = self._apply_search_filters(stmt, category, clse_after, q)
         return self._session.execute(stmt).scalar_one()
 

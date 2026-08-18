@@ -186,6 +186,52 @@ def test_clse_after_excludes_expired_keeps_null(session):
     assert repo.count(category=None, ntce_dt_from=None, ntce_dt_to=None, clse_after=cutoff) == 2
 
 
+def _require_ntce_kind_nm(session: Session) -> None:
+    """취소 게이트(#140)는 ntce_kind_nm 컬럼 전제 — 옛 로컬 DB(재초기화 전)면 skip."""
+    exists = session.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'bid_table' AND column_name = 'ntce_kind_nm'"
+        )
+    ).scalar()
+    if exists is None:
+        pytest.skip("ntce_kind_nm 컬럼 없음 — db/schema 재적용(docker compose 재초기화) 필요")
+
+
+def test_canceled_notice_hides_all_ords(session):
+    """같은 공고번호에 취소공고 차수가 있으면 원 공고까지 전부 숨는다(#140)."""
+    _require_ntce_kind_nm(session)
+    # 원 공고(merged) + 취소공고 차수. 취소공고 행은 첨부가 없어 보통 merged가 아니지만,
+    # merged여도 카드로 새어 나가면 안 되므로 일부러 merged로 넣는다.
+    _insert(session, bid_ntce_no="cx", bid_ntce_ord="000")
+    _insert(session, bid_ntce_no="cx", bid_ntce_ord="001")
+    _insert(session, bid_ntce_no="ok", bid_ntce_ord="000")
+    session.execute(
+        text("UPDATE bid_table SET ntce_kind_nm = '취소공고' "
+             "WHERE bid_ntce_no = 'cx' AND bid_ntce_ord = '001'")
+    )
+    repo = BidRepository(session)
+
+    assert repo.count(category=None, ntce_dt_from=None, ntce_dt_to=None) == 1
+    rows = repo.list_page(category=None, ntce_dt_from=None, ntce_dt_to=None, limit=20, offset=0)
+    assert [r.bid_id for r in rows] == ["ok_000"]
+    assert repo.search_count(category=None) == 1
+    assert repo.get_by_bid_id("cx_000") is None   # 원 공고 상세도 404
+    assert repo.get_by_bid_id("cx_001") is None   # 취소공고 행 자신도 노출 금지
+
+
+def test_non_cancel_kind_stays_visible(session):
+    """등록공고/재공고/변경공고 값은 노출에 영향이 없어야 한다(#140)."""
+    _require_ntce_kind_nm(session)
+    _insert(session, bid_ntce_no="rg", bid_ntce_ord="000")
+    session.execute(
+        text("UPDATE bid_table SET ntce_kind_nm = '재공고' WHERE bid_ntce_no = 'rg'")
+    )
+    repo = BidRepository(session)
+    assert repo.get_by_bid_id("rg_000") is not None
+    assert repo.count(category=None, ntce_dt_from=None, ntce_dt_to=None) == 1
+
+
 def test_today_range_filter_on_ntce_dt(session):
     _insert(session, bid_ntce_no="in", bid_ntce_dt=datetime(2026, 7, 21, 9, 0))
     _insert(session, bid_ntce_no="yday", bid_ntce_dt=datetime(2026, 7, 20, 9, 0))
